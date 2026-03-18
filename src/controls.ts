@@ -38,7 +38,7 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
     },
     distance: {
       label: "Alignment",
-      value: "All nine worlds share the same side of the Sun, arranged outward by heliocentric distance.",
+      value: "All eight planets share the same side of the Sun, arranged outward by heliocentric distance.",
     },
     radius: {
       label: "Scale",
@@ -54,7 +54,7 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
     },
     note: {
       label: "Source",
-      value: "Positions are computed from JPL orbital elements, with Pluto sourced from JPL SBDB.",
+      value: "Positions are computed from JPL orbital elements.",
     },
   };
 }
@@ -95,7 +95,7 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
           <div class="focus-heading-copy">
             <h2 data-focus-heading>The 2161 alignment</h2>
             <p data-focus-subheading>
-              Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all nine worlds gather on one side of the Sun.
+              Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all eight planets gather on one side of the Sun.
             </p>
           </div>
         </div>
@@ -218,7 +218,7 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
 
   const applyDefaultFocus = () => {
     focusHeading.textContent = "The 2161 alignment";
-    focusSubheading.innerHTML = `Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all nine worlds gather on one side of the Sun.`;
+    focusSubheading.innerHTML = `Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all eight planets gather on one side of the Sun.`;
     categoryLabel.textContent = defaultInfoCopy.category.label;
     categoryValue.textContent = defaultInfoCopy.category.value;
     distanceLabel.textContent = defaultInfoCopy.distance.label;
