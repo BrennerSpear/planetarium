@@ -16,9 +16,53 @@ interface ControlPanelOptions {
   initialScaleMode: ScaleMode;
 }
 
+interface InfoSlotCopy {
+  label: string;
+  value: string;
+}
+
+const PLANET_INFO_LABELS = {
+  category: "Category",
+  distance: "Heliocentric distance",
+  radius: "Radius",
+  period: "Orbital period",
+  anomaly: "Mean anomaly",
+  note: "Source note",
+} as const;
+
+function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_LABELS, InfoSlotCopy> {
+  return {
+    category: {
+      label: "Date",
+      value: dateLabel,
+    },
+    distance: {
+      label: "Alignment",
+      value: "All nine worlds share the same side of the Sun, arranged outward by heliocentric distance.",
+    },
+    radius: {
+      label: "Scale",
+      value: "Visible scale keeps each planet legible; True scale restores their physical proportions.",
+    },
+    period: {
+      label: "Interaction",
+      value: "Hover labels for a preview, click a planet to pin it, then drag, zoom, or pan the scene.",
+    },
+    anomaly: {
+      label: "View",
+      value: "A luminous path threads through the lineup while floating markers label the span between neighbors.",
+    },
+    note: {
+      label: "Source",
+      value: "Positions are computed from JPL orbital elements, with Pluto sourced from JPL SBDB.",
+    },
+  };
+}
+
 export function createControlPanel(options: ControlPanelOptions): ControlPanel {
   const root = options.root;
   const scaleHandlers: ScaleModeChangeHandler[] = [];
+  const defaultInfoCopy = getDefaultInfoCopy(options.dateLabel);
 
   root.innerHTML = `
     <section class="panel brand-panel">
@@ -40,39 +84,46 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
         <button type="button" class="toggle-button" data-scale-toggle="true">True scale</button>
       </div>
       <p class="helper-copy">
-        The issue description listed a different Julian date; the scene uses the exact converted value for May 19, 2161.
+        Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.
       </p>
     </section>
 
-    <section class="panel info-panel">
+    <section class="panel info-panel" data-focus-source="none">
       <div class="panel-heading">
-        <h2 data-focus-heading>Hover or select a planet</h2>
-        <p data-focus-subheading>Labels and the 3D scene both drive the same info card.</p>
+        <div class="focus-heading-row">
+          <span class="focus-accent" data-focus-accent hidden></span>
+          <div class="focus-heading-copy">
+            <h2 data-focus-heading>The 2161 alignment</h2>
+            <p data-focus-subheading>
+              Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all nine worlds gather on one side of the Sun.
+            </p>
+          </div>
+        </div>
       </div>
       <div class="info-grid">
         <div class="info-item">
-          <span class="info-label">Category</span>
-          <span class="info-value" data-info-category>Alignment target</span>
+          <span class="info-label" data-info-category-label>${defaultInfoCopy.category.label}</span>
+          <span class="info-value" data-info-category>${defaultInfoCopy.category.value}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">Heliocentric distance</span>
-          <span class="info-value" data-info-distance>9 planets along the same side of the Sun.</span>
+          <span class="info-label" data-info-distance-label>${defaultInfoCopy.distance.label}</span>
+          <span class="info-value" data-info-distance>${defaultInfoCopy.distance.value}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">Radius</span>
-          <span class="info-value" data-info-radius>Scale-correct radii relative to one another.</span>
+          <span class="info-label" data-info-radius-label>${defaultInfoCopy.radius.label}</span>
+          <span class="info-value" data-info-radius>${defaultInfoCopy.radius.value}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">Orbital period</span>
-          <span class="info-value" data-info-period>Derived from the orbital elements.</span>
+          <span class="info-label" data-info-period-label>${defaultInfoCopy.period.label}</span>
+          <span class="info-value" data-info-period>${defaultInfoCopy.period.value}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">Mean anomaly</span>
-          <span class="info-value" data-info-anomaly>Computed from the JPL element set.</span>
+          <span class="info-label" data-info-anomaly-label>${defaultInfoCopy.anomaly.label}</span>
+          <span class="info-value" data-info-anomaly>${defaultInfoCopy.anomaly.value}</span>
         </div>
         <div class="info-item">
-          <span class="info-label">Source note</span>
-          <span class="info-value" data-info-note>JPL approximation table plus a Pluto fallback from JPL SBDB.</span>
+          <span class="info-label" data-info-note-label>${defaultInfoCopy.note.label}</span>
+          <span class="info-value" data-info-note>${defaultInfoCopy.note.value}</span>
         </div>
       </div>
     </section>
@@ -81,8 +132,8 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
       <div>
         <p class="eyebrow">Guide</p>
         <p class="lede compact">
-          The dashed axis runs from the Sun toward the alignment and out past Pluto, while the AU markers show the
-          radial spacing between adjacent worlds along that guide.
+          The glowing alignment path follows the planets in heliocentric order, and the floating markers show the
+          spacing between neighboring worlds.
         </p>
       </div>
     </section>
@@ -95,23 +146,39 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     throw new Error("Scale controls did not initialize");
   }
 
+  const infoPanel = root.querySelector<HTMLElement>(".info-panel");
   const focusHeading = root.querySelector<HTMLElement>("[data-focus-heading]");
   const focusSubheading = root.querySelector<HTMLElement>("[data-focus-subheading]");
+  const focusAccent = root.querySelector<HTMLElement>("[data-focus-accent]");
+  const categoryLabel = root.querySelector<HTMLElement>("[data-info-category-label]");
   const categoryValue = root.querySelector<HTMLElement>("[data-info-category]");
+  const distanceLabel = root.querySelector<HTMLElement>("[data-info-distance-label]");
   const distanceValue = root.querySelector<HTMLElement>("[data-info-distance]");
+  const radiusLabel = root.querySelector<HTMLElement>("[data-info-radius-label]");
   const radiusValue = root.querySelector<HTMLElement>("[data-info-radius]");
+  const periodLabel = root.querySelector<HTMLElement>("[data-info-period-label]");
   const periodValue = root.querySelector<HTMLElement>("[data-info-period]");
+  const anomalyLabel = root.querySelector<HTMLElement>("[data-info-anomaly-label]");
   const anomalyValue = root.querySelector<HTMLElement>("[data-info-anomaly]");
+  const noteLabel = root.querySelector<HTMLElement>("[data-info-note-label]");
   const noteValue = root.querySelector<HTMLElement>("[data-info-note]");
 
   if (
-    !focusHeading
+    !infoPanel
+    || !focusHeading
     || !focusSubheading
+    || !focusAccent
+    || !categoryLabel
     || !categoryValue
+    || !distanceLabel
     || !distanceValue
+    || !radiusLabel
     || !radiusValue
+    || !periodLabel
     || !periodValue
+    || !anomalyLabel
     || !anomalyValue
+    || !noteLabel
     || !noteValue
   ) {
     throw new Error("Info panel did not initialize");
@@ -142,7 +209,43 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     });
   }
 
+  const resetFocusAccent = () => {
+    focusAccent.hidden = true;
+    focusAccent.style.backgroundColor = "";
+    infoPanel.dataset.focusSource = "none";
+    infoPanel.style.borderColor = "";
+  };
+
+  const applyDefaultFocus = () => {
+    focusHeading.textContent = "The 2161 alignment";
+    focusSubheading.innerHTML = `Approximate heliocentric positions for <strong>${options.dateLabel}</strong>, when all nine worlds gather on one side of the Sun.`;
+    categoryLabel.textContent = defaultInfoCopy.category.label;
+    categoryValue.textContent = defaultInfoCopy.category.value;
+    distanceLabel.textContent = defaultInfoCopy.distance.label;
+    distanceValue.textContent = defaultInfoCopy.distance.value;
+    radiusLabel.textContent = defaultInfoCopy.radius.label;
+    radiusValue.textContent = defaultInfoCopy.radius.value;
+    periodLabel.textContent = defaultInfoCopy.period.label;
+    periodValue.textContent = defaultInfoCopy.period.value;
+    anomalyLabel.textContent = defaultInfoCopy.anomaly.label;
+    anomalyValue.textContent = defaultInfoCopy.anomaly.value;
+    noteLabel.textContent = defaultInfoCopy.note.label;
+    noteValue.textContent = defaultInfoCopy.note.value;
+    resetFocusAccent();
+    document.body.dataset.selectedPlanet = "";
+  };
+
+  const applyPlanetFocusLabels = () => {
+    categoryLabel.textContent = PLANET_INFO_LABELS.category;
+    distanceLabel.textContent = PLANET_INFO_LABELS.distance;
+    radiusLabel.textContent = PLANET_INFO_LABELS.radius;
+    periodLabel.textContent = PLANET_INFO_LABELS.period;
+    anomalyLabel.textContent = PLANET_INFO_LABELS.anomaly;
+    noteLabel.textContent = PLANET_INFO_LABELS.note;
+  };
+
   applyScaleMode(options.initialScaleMode);
+  applyDefaultFocus();
 
   return {
     bindScaleModeChange(handler) {
@@ -153,28 +256,25 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     },
     updateFocus(snapshot, source) {
       if (!snapshot) {
-        focusHeading.textContent = "Hover or select a planet";
-        focusSubheading.textContent = "Labels and the 3D scene both drive the same info card.";
-        categoryValue.textContent = "Alignment target";
-        distanceValue.textContent = "9 planets along the same side of the Sun.";
-        radiusValue.textContent = "Scale-correct radii relative to one another.";
-        periodValue.textContent = "Derived from the orbital elements.";
-        anomalyValue.textContent = "Computed from the JPL element set.";
-        noteValue.textContent = "JPL approximation table plus a Pluto fallback from JPL SBDB.";
-        document.body.dataset.selectedPlanet = "";
+        applyDefaultFocus();
         return;
       }
 
+      applyPlanetFocusLabels();
       focusHeading.textContent = snapshot.definition.label;
       focusSubheading.textContent = source === "selected"
-        ? "Selection pinned from a click."
-        : "Previewing the current hover target.";
+        ? "Pinned from your current selection."
+        : "Live preview from the current hover target.";
       categoryValue.textContent = snapshot.definition.category;
       distanceValue.textContent = `${formatDistanceAu(snapshot.heliocentricDistanceAu)} (${formatDistanceMillionKm(snapshot.heliocentricDistanceAu)})`;
       radiusValue.textContent = `${snapshot.definition.radiusKm.toLocaleString()} km`;
       periodValue.textContent = `${snapshot.orbitalPeriodYears.toFixed(1)} years`;
       anomalyValue.textContent = `${snapshot.meanAnomalyDeg.toFixed(1)}°`;
       noteValue.textContent = snapshot.definition.note ?? "Position derived from the JPL approximation model.";
+      focusAccent.hidden = source !== "selected";
+      focusAccent.style.backgroundColor = snapshot.definition.visual.accentColor;
+      infoPanel.dataset.focusSource = source;
+      infoPanel.style.borderColor = source === "selected" ? snapshot.definition.visual.accentColor : "";
       document.body.dataset.selectedPlanet = source === "selected" ? snapshot.definition.id : "";
     },
   };
