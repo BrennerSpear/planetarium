@@ -15,10 +15,11 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await expect(distanceLabels).toHaveCount(0);
   await expect(alignmentGuideLayer).toHaveCount(0);
   await expect(distanceLabelLayer).toHaveCount(0);
-  await expect(page.locator("[data-scale-toggle='visible']")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".helper-copy")).toHaveText(
-    "Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.",
-  );
+  await expect(page.locator("[data-scale-toggle-row]")).toHaveCount(0);
+  await expect(page.locator("[data-scale-toggle]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Visible scale" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "True scale" })).toHaveCount(0);
+  await expect(page.locator(".helper-copy")).toHaveCount(0);
   await expect(page.locator("[data-focus-heading]")).toHaveText("The 2161 alignment");
   await expect(page.locator("[data-focus-subheading]")).toHaveText(
     "Approximate heliocentric positions for May 19, 2161, when all eight planets gather on one side of the Sun.",
@@ -29,6 +30,10 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await expect(page.locator("[data-info-distance]")).toHaveText(
     "All eight planets share the same side of the Sun, arranged outward by heliocentric distance.",
   );
+  await expect(page.locator("[data-info-radius-label]")).toHaveText("Scale");
+  await expect(page.locator("[data-info-radius]")).toHaveText(
+    "Planet sizes are tuned for legibility so the full alignment remains readable at solar-system distances.",
+  );
   await expect(page.locator(".footer-panel .lede")).toHaveText(
     "Floating planet names and faint orbital rings keep the alignment legible while you pan, orbit, and zoom.",
   );
@@ -36,6 +41,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   const initialState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(initialState).toBeTruthy();
+  expect(initialState?.scaleMode).toBe("visible");
   expect(initialState?.planetCount).toBe(8);
   expect(initialState?.orbitCount).toBe(8);
   expect(initialState?.julianDate).toBe(2510487.5);
@@ -107,29 +113,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     focusedState?.camera.target,
     focusedState?.planetDisplayPositions.earth,
   )).toBeLessThan(0.001);
-
-  await page.getByRole("button", { name: "True scale" }).click();
-  await expect(page.locator("body")).toHaveAttribute("data-scale-mode", "true");
-  await waitForStableFrame(page);
-
-  await expect.poll(async () => {
-    const state = await page.evaluate(() => window.__planetariumTestApi?.getState());
-    return Math.abs((state?.planetDisplayDistancesAu.earth ?? 0) - (state?.planetActualDistancesAu.earth ?? 0));
-  }).toBeLessThan(0.00001);
-
-  const trueScaleState = await page.evaluate(() => window.__planetariumTestApi?.getState());
-  expect(trueScaleState?.visuals.saturn.ringOuterRadius).toBeLessThan(
-    initialState?.visuals.saturn.ringOuterRadius ?? Number.POSITIVE_INFINITY,
+  expect(focusedState?.planetDisplayDistancesAu.earth).toBeGreaterThan(
+    focusedState?.planetActualDistancesAu.earth ?? 0,
   );
-  expect(trueScaleState?.visuals.sun.glowRadius).toBeLessThan(
-    initialState?.visuals.sun.glowRadius ?? Number.POSITIVE_INFINITY,
-  );
-
-  await page.locator("[data-planet-label='earth']").evaluate((node) => {
-    (node as HTMLButtonElement).click();
-  });
-  await expect(page.locator("[data-focus-heading]")).toHaveText("Earth");
-  await expect(page.locator("[data-info-category]")).toHaveText("Terrestrial");
   await expect(page.locator(".info-panel")).toHaveAttribute("data-focus-source", "selected");
   await expect(focusAccent).toBeVisible();
   await expect(focusAccent).toHaveCSS("background-color", "rgb(158, 212, 255)");
@@ -143,9 +129,22 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await page.mouse.up();
 
   const afterCamera = await page.evaluate(() => window.__planetariumTestApi?.getState().camera);
+  const postInteractionState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(afterCamera).not.toEqual(beforeCamera);
+  expect(postInteractionState?.scaleMode).toBe("visible");
+  expect(postInteractionState?.planetDisplayDistancesAu.earth).toBeGreaterThan(
+    postInteractionState?.planetActualDistancesAu.earth ?? 0,
+  );
+  expect(postInteractionState?.visuals.saturn.ringOuterRadius).toBeCloseTo(
+    initialState?.visuals.saturn.ringOuterRadius ?? 0,
+    6,
+  );
+  expect(postInteractionState?.visuals.sun.glowRadius).toBeCloseTo(
+    initialState?.visuals.sun.glowRadius ?? 0,
+    6,
+  );
 
-  await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-true-scale-earth-orbit.png");
+  await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-earth-focus.png");
 });
 
 test("renders Saturn rings and Sun glow closeups deterministically", async ({ page }) => {

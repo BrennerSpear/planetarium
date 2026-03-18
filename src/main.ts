@@ -38,7 +38,6 @@ const controls = createControlPanel({
   root: hudRoot,
   dateLabel: TARGET_DATE_LABEL,
   julianDate: TARGET_JULIAN_DATE,
-  initialScaleMode: "visible",
 });
 const overlay = createOverlayLayer({ root: overlayRoot });
 const scene = createPlanetariumScene({
@@ -46,10 +45,6 @@ const scene = createPlanetariumScene({
   controls,
   overlay,
   testMode,
-});
-
-controls.bindScaleModeChange((mode) => {
-  scene.setScaleMode(mode);
 });
 
 overlay.bindPlanetSelection((planetId) => {
