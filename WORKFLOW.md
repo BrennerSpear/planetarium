@@ -86,7 +86,7 @@ Use JPL approximate Keplerian orbital elements for the J2000 epoch (valid 3000 B
 Source: https://ssd.jpl.nasa.gov/planets/approx_pos.html
 
 For May 19, 2161:
-- Julian Date: ~2,514,166.5
+- Julian Date: ~2,510,487.5
 - Compute each planet's mean anomaly, eccentric anomaly (Kepler's equation), then heliocentric coordinates
 - Apply orbital elements (a, e, I, L, ω̄, Ω) and their rates
 

@@ -4,7 +4,7 @@ const J2000_JULIAN_DATE = 2_451_545.0;
 const DEG_TO_RAD = Math.PI / 180;
 const TAU = Math.PI * 2;
 
-export const ALIGNMENT_JULIAN_DATE = 2_514_166.5;
+export const ALIGNMENT_JULIAN_DATE = 2_510_487.5;
 
 export const PLANET_NAMES = [
   "Mercury",
@@ -390,4 +390,3 @@ export const sortPlanetsByHeliocentricDistance = (
   planets: PlanetState[],
 ): PlanetState[] =>
   [...planets].sort((left, right) => left.distanceFromSunAu - right.distanceFromSunAu);
-

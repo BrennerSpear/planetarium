@@ -31,7 +31,7 @@ test("supports deterministic selection, scaling, and camera control", async ({
 
   await page.getByTestId("planet-button-neptune").click();
   await expect(page.getByTestId("planet-info")).toContainText("Neptune");
-  await expect(page.getByTestId("planet-info")).toContainText("30.06 AU");
+  await expect(page.getByTestId("planet-info")).toContainText("30.16 AU");
 
   const beforeCamera = await page.evaluate(
     () => window.__PLANETARIUM__?.getSnapshot().cameraPosition,
