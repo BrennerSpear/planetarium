@@ -9,6 +9,8 @@ import type { PlanetDefinition } from "./planets";
 import { createMulberry32 } from "./random";
 
 const textureCache = new Map<string, CanvasTexture>();
+const ringTextureCache = new Map<string, CanvasTexture>();
+let sunGlowTexture: CanvasTexture | null = null;
 
 type RGB = [number, number, number];
 
@@ -59,6 +61,124 @@ export function createPlanetTexture(definition: PlanetDefinition): CanvasTexture
 
   textureCache.set(definition.id, texture);
   return texture;
+}
+
+export function createSaturnRingTexture(innerRadiusRatio: number, outerRadiusRatio: number): CanvasTexture {
+  const cacheKey = `${innerRadiusRatio.toFixed(3)}:${outerRadiusRatio.toFixed(3)}`;
+  const cached = ringTextureCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 1024;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Unable to build Saturn ring texture");
+  }
+
+  const imageData = context.createImageData(canvas.width, canvas.height);
+  const center = canvas.width / 2;
+  const innerNormalizedRadius = clamp01(innerRadiusRatio / outerRadiusRatio);
+  const ringWidth = Math.max(1 - innerNormalizedRadius, 0.001);
+  const innerColor: RGB = [244, 232, 202];
+  const midColor: RGB = [208, 185, 145];
+  const outerColor: RGB = [108, 89, 69];
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const dx = (x - center) / center;
+      const dy = (y - center) / center;
+      const radius = Math.sqrt(dx ** 2 + dy ** 2);
+      const index = (y * canvas.width + x) * 4;
+
+      if (radius < innerNormalizedRadius || radius > 1) {
+        imageData.data[index + 3] = 0;
+        continue;
+      }
+
+      const ringT = clamp01((radius - innerNormalizedRadius) / ringWidth);
+      const innerEdge = smoothstep(innerNormalizedRadius, innerNormalizedRadius + ringWidth * 0.08, radius);
+      const outerEdge = 1 - smoothstep(0.94, 1, radius);
+      const edgeFade = innerEdge * outerEdge;
+      const banding = 0.5
+        + 0.22 * Math.sin(ringT * 58)
+        + 0.12 * Math.sin(ringT * 131 + 0.8)
+        + 0.08 * Math.sin(ringT * 260 + 1.9);
+      const cassiniDivision = 1 - 0.36 * smoothstep(0.47, 0.54, ringT) * (1 - smoothstep(0.54, 0.62, ringT));
+      const baseColor = ringT < 0.42
+        ? mixRgb(innerColor, midColor, ringT / 0.42)
+        : mixRgb(midColor, outerColor, (ringT - 0.42) / 0.58);
+      const highlighted = mixRgb(baseColor, [255, 247, 227], clamp01(0.06 + banding * 0.14));
+      const shaded = mixRgb(highlighted, [62, 49, 38], clamp01((1 - cassiniDivision) * 0.55));
+      const alpha = clamp01(lerp(0.82, 0.22, ringT) * edgeFade * (0.88 + banding * 0.18));
+
+      imageData.data[index] = shaded[0];
+      imageData.data[index + 1] = shaded[1];
+      imageData.data[index + 2] = shaded[2];
+      imageData.data[index + 3] = Math.round(alpha * 255);
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+
+  ringTextureCache.set(cacheKey, texture);
+  return texture;
+}
+
+export function createSunGlowTexture(): CanvasTexture {
+  if (sunGlowTexture) {
+    return sunGlowTexture;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Unable to build Sun glow texture");
+  }
+
+  const center = canvas.width / 2;
+  const outerRadius = canvas.width * 0.48;
+  const innerGlow = context.createRadialGradient(center, center, canvas.width * 0.05, center, center, outerRadius);
+  innerGlow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
+  innerGlow.addColorStop(0.18, "rgba(255, 255, 255, 0.72)");
+  innerGlow.addColorStop(0.46, "rgba(255, 255, 255, 0.22)");
+  innerGlow.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+  context.fillStyle = innerGlow;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const outerHalo = context.createRadialGradient(center, center, canvas.width * 0.18, center, center, canvas.width * 0.5);
+  outerHalo.addColorStop(0, "rgba(255, 255, 255, 0.14)");
+  outerHalo.addColorStop(0.62, "rgba(255, 255, 255, 0.07)");
+  outerHalo.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+  context.fillStyle = outerHalo;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  sunGlowTexture = new CanvasTexture(canvas);
+  sunGlowTexture.colorSpace = SRGBColorSpace;
+  sunGlowTexture.wrapS = ClampToEdgeWrapping;
+  sunGlowTexture.wrapT = ClampToEdgeWrapping;
+  sunGlowTexture.magFilter = LinearFilter;
+  sunGlowTexture.minFilter = LinearFilter;
+
+  return sunGlowTexture;
 }
 
 function samplePlanetColor(

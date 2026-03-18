@@ -1,5 +1,6 @@
 import {
   ACESFilmicToneMapping,
+  AdditiveBlending,
   AmbientLight,
   BackSide,
   BufferGeometry,
@@ -8,12 +9,12 @@ import {
   ClampToEdgeWrapping,
   Color,
   Float32BufferAttribute,
+  DoubleSide,
   Group,
   LinearFilter,
   Line,
   LineBasicMaterial,
   LineDashedMaterial,
-  LineLoop,
   LineSegments,
   Mesh,
   MeshBasicMaterial,
@@ -23,10 +24,13 @@ import {
   Points,
   PointsMaterial,
   Raycaster,
+  RingGeometry,
   Scene,
   ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
+  Sprite,
+  SpriteMaterial,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -36,18 +40,16 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { ControlPanel } from "./controls";
 import {
   formatDistanceAu,
-  getDisplayPosition,
-  getOrbitPathPoints,
   getPlanetSnapshots,
   getSunRadii,
   type PlanetSnapshot,
   type ScaleMode,
-  SUN_DEFINITION,
   TARGET_DATE_LABEL,
   TARGET_JULIAN_DATE,
+  SUN_DEFINITION,
 } from "./planets";
 import { createMulberry32 } from "./random";
-import { createPlanetTexture } from "./textures";
+import { createPlanetTexture, createSaturnRingTexture, createSunGlowTexture } from "./textures";
 import type { OverlayAlignmentGuide, OverlayLayer } from "./ui/overlay";
 
 interface PlanetariumSceneOptions {
@@ -62,16 +64,9 @@ interface PlanetMeshInstance {
   anchor: Group;
   mesh: Mesh;
   material: MeshStandardMaterial;
-  visiblePosition: Vector3;
-  currentPosition: Vector3;
   currentRadius: number;
-}
-
-interface OrbitLineInstance {
-  geometry: BufferGeometry;
-  truePoints: Vector3[];
-  visiblePoints: Vector3[];
-  currentPoints: Vector3[];
+  ringMesh: Mesh | null;
+  ringMaterial: MeshStandardMaterial | null;
 }
 
 interface CameraFraming {
@@ -79,14 +74,6 @@ interface CameraFraming {
   target: Vector3;
   up: Vector3;
   introPosition: Vector3;
-}
-
-interface CameraAnimationState {
-  startPosition: Vector3;
-  endPosition: Vector3;
-  startTarget: Vector3;
-  endTarget: Vector3;
-  progress: number;
 }
 
 interface AlignmentLayout {
@@ -110,7 +97,6 @@ interface TestApiState {
   julianDate: number;
   scaleMode: ScaleMode;
   planetCount: number;
-  orbitCount: number;
   labels: string[];
   selectedPlanetId: string | null;
   hoveredPlanetId: string | null;
@@ -121,9 +107,6 @@ interface TestApiState {
     orderedPlanetIds: string[];
     offsetByPlanetId: Record<string, number>;
   };
-  planetActualDistancesAu: Record<string, number>;
-  planetDisplayDistancesAu: Record<string, number>;
-  planetDisplayPositions: Record<string, [number, number, number]>;
   camera: {
     position: [number, number, number];
     target: [number, number, number];
@@ -132,6 +115,20 @@ interface TestApiState {
     starCount: number;
     starSeed: number;
     layerCount: number;
+  };
+  visuals: {
+    sun: {
+      radius: number;
+      glowRadius: number;
+      glowOpacity: number;
+    };
+    saturn: {
+      radius: number;
+      ringTiltDeg: number;
+      ringInnerRadius: number;
+      ringOuterRadius: number;
+      ringOpacity: number;
+    };
   };
 }
 
@@ -153,6 +150,7 @@ declare global {
   interface Window {
     __planetariumTestApi?: {
       getState(): TestApiState;
+      framePlanet(planetId: string): boolean;
     };
   }
 }
@@ -176,9 +174,14 @@ const STARFIELD_TONES = [
   new Color("#dfeaff"),
   new Color("#d2e1ff"),
 ] as const;
+const SATURN_RING_INNER_RATIO = 1.38;
+const SATURN_RING_OUTER_RATIO = 2.35;
+const SATURN_RING_TILT_DEG = 26.7;
+const SATURN_RING_TILT_RADIANS = (SATURN_RING_TILT_DEG * Math.PI) / 180;
+const SUN_GLOW_RADIUS_RATIO = 3.2;
 
 export function createPlanetariumScene(options: PlanetariumSceneOptions): {
-  focusPlanet(planetId: string): void;
+  selectPlanet(planetId: string): void;
   setScaleMode(mode: ScaleMode): void;
 } {
   const scene = new Scene();
@@ -220,35 +223,29 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const sunMesh = new Mesh(sunGeometry, sunMaterial);
   scene.add(sunMesh);
 
+  const sunGlowMaterial = new SpriteMaterial({
+    map: createSunGlowTexture(),
+    color: new Color("#ffb35a"),
+    transparent: true,
+    opacity: 0.56,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
+  sunGlowMaterial.toneMapped = false;
+
+  const sunGlow = new Sprite(sunGlowMaterial);
+  scene.add(sunGlow);
+
   const snapshots = getPlanetSnapshots(TARGET_JULIAN_DATE);
-  const planetGeometry = new SphereGeometry(1, 64, 32);
+  const geometry = new SphereGeometry(1, 64, 32);
+  const saturnRingGeometry = new RingGeometry(SATURN_RING_INNER_RATIO, SATURN_RING_OUTER_RATIO, 128, 12);
   const planetInstances: PlanetMeshInstance[] = [];
   const planetMeshes: Mesh[] = [];
-  const orbitInstances: OrbitLineInstance[] = [];
+  const planetInstanceById = new Map<string, PlanetMeshInstance>();
   const snapshotById = new Map<string, PlanetSnapshot>();
-  const planetById = new Map<string, PlanetMeshInstance>();
 
   for (const snapshot of snapshots) {
     snapshotById.set(snapshot.definition.id, snapshot);
-
-    const trueOrbitPoints = getOrbitPathPoints(snapshot.definition, TARGET_JULIAN_DATE);
-    const visibleOrbitPoints = trueOrbitPoints.map((point) => getDisplayPosition(point, "visible"));
-    const currentOrbitPoints = visibleOrbitPoints.map((point) => point.clone());
-    const orbitGeometry = new BufferGeometry().setFromPoints(currentOrbitPoints);
-    const orbitMaterial = new LineBasicMaterial({
-      color: new Color(snapshot.definition.visual.accentColor),
-      transparent: true,
-      opacity: 0.13,
-      depthWrite: false,
-    });
-    const orbitLine = new LineLoop(orbitGeometry, orbitMaterial);
-    scene.add(orbitLine);
-    orbitInstances.push({
-      geometry: orbitGeometry,
-      truePoints: trueOrbitPoints,
-      visiblePoints: visibleOrbitPoints,
-      currentPoints: currentOrbitPoints,
-    });
 
     const material = new MeshStandardMaterial({
       map: createPlanetTexture(snapshot.definition),
@@ -258,13 +255,44 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       emissive: new Color("#000000"),
       emissiveIntensity: 0,
     });
-    const mesh = new Mesh(planetGeometry, material);
+    const mesh = new Mesh(geometry, material);
     mesh.userData.planetId = snapshot.definition.id;
 
-    const visiblePosition = getDisplayPosition(snapshot.position, "visible");
     const anchor = new Group();
-    anchor.position.copy(visiblePosition);
-    anchor.add(mesh);
+    anchor.position.copy(snapshot.position);
+
+    let ringMesh: Mesh | null = null;
+    let ringMaterial: MeshStandardMaterial | null = null;
+
+    if (snapshot.definition.id === "saturn") {
+      const tiltedGroup = new Group();
+      tiltedGroup.rotation.z = SATURN_RING_TILT_RADIANS;
+
+      ringMaterial = new MeshStandardMaterial({
+        map: createSaturnRingTexture(SATURN_RING_INNER_RATIO, SATURN_RING_OUTER_RATIO),
+        color: 0xffffff,
+        roughness: 0.94,
+        metalness: 0,
+        emissive: new Color("#f3d8ab"),
+        emissiveIntensity: 0.05,
+        transparent: true,
+        opacity: 0.88,
+        side: DoubleSide,
+        alphaTest: 0.02,
+        depthWrite: false,
+      });
+      ringMesh = new Mesh(saturnRingGeometry, ringMaterial);
+      ringMesh.userData.planetId = snapshot.definition.id;
+      ringMesh.rotation.x = Math.PI / 2;
+
+      tiltedGroup.add(mesh);
+      tiltedGroup.add(ringMesh);
+      anchor.add(tiltedGroup);
+      planetMeshes.push(ringMesh);
+    } else {
+      anchor.add(mesh);
+    }
+
     scene.add(anchor);
 
     const instance: PlanetMeshInstance = {
@@ -272,20 +300,20 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       anchor,
       mesh,
       material,
-      visiblePosition,
-      currentPosition: visiblePosition.clone(),
       currentRadius: snapshot.visibleRadiusAu,
+      ringMesh,
+      ringMaterial,
     };
 
     planetInstances.push(instance);
+    planetInstanceById.set(snapshot.definition.id, instance);
     planetMeshes.push(mesh);
-    planetById.set(snapshot.definition.id, instance);
   }
 
   const orderedForAxis = [...planetInstances].sort(
     (left, right) => left.snapshot.heliocentricDistanceAu - right.snapshot.heliocentricDistanceAu,
   );
-  let alignmentLayout = createAlignmentLayout(orderedForAxis);
+  const alignmentLayout = createAlignmentLayout(orderedForAxis);
   const alignmentGeometry = new BufferGeometry().setFromPoints([
     new Vector3(0, 0, 0),
     alignmentLayout.axisDirection.clone().multiplyScalar(alignmentLayout.axisLengthAu),
@@ -314,13 +342,12 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   alignmentLine.renderOrder = 2;
   scene.add(alignmentLine);
 
-  const alignmentDotsGeometry = new BufferGeometry().setFromPoints(createAlignmentDotPoints(
-    alignmentLayout.axisDirection,
-    alignmentLayout.axisLengthAu,
-    1.6,
-  ));
   const alignmentDots = new Points(
-    alignmentDotsGeometry,
+    new BufferGeometry().setFromPoints(createAlignmentDotPoints(
+      alignmentLayout.axisDirection,
+      alignmentLayout.axisLengthAu,
+      1.6,
+    )),
     new PointsMaterial({
       color: 0xf8fbff,
       size: 0.32,
@@ -350,16 +377,16 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const pointer = new Vector2(2, 2);
   const clock = new Clock();
   const sunRadii = getSunRadii();
+  const saturnInstance = planetInstanceById.get("saturn") ?? null;
   let sunRadius = sunRadii.visibleRadiusAu;
   let scaleMode: ScaleMode = "visible";
   let hoveredPlanetId: string | null = null;
   let selectedPlanetId: string | null = null;
-  let cameraAnimation: CameraAnimationState | null = null;
   let viewport = {
     width: options.canvasRoot.clientWidth,
     height: options.canvasRoot.clientHeight,
   };
-  let framing = computeCameraFraming(orderedForAxis, camera);
+  let framing = computeCameraFraming(orderedForAxis.map((instance) => instance.snapshot), camera);
   let introElapsedSeconds = options.testMode ? INITIAL_FRAME_DURATION_SECONDS : 0;
   let autoMotionStopped = options.testMode;
 
@@ -384,26 +411,20 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     julianDate: TARGET_JULIAN_DATE,
     scaleMode,
     planetCount: snapshots.length,
-    orbitCount: orbitInstances.length,
     labels: snapshots.map((snapshot) => snapshot.definition.label),
     selectedPlanetId: null,
     hoveredPlanetId: null,
     alignment: {
-      axisDirection: toTuple(alignmentLayout.axisDirection),
+      axisDirection: [
+        alignmentLayout.axisDirection.x,
+        alignmentLayout.axisDirection.y,
+        alignmentLayout.axisDirection.z,
+      ],
       axisLengthAu: alignmentLayout.axisLengthAu,
       connectorCount: alignmentLayout.axisConnectorCount,
       orderedPlanetIds: alignmentLayout.orderedPlanetIds,
       offsetByPlanetId: { ...alignmentLayout.offsetByPlanetId },
     },
-    planetActualDistancesAu: Object.fromEntries(
-      snapshots.map((snapshot) => [snapshot.definition.id, snapshot.heliocentricDistanceAu]),
-    ),
-    planetDisplayDistancesAu: Object.fromEntries(
-      planetInstances.map((instance) => [instance.snapshot.definition.id, instance.currentPosition.length()]),
-    ),
-    planetDisplayPositions: Object.fromEntries(
-      planetInstances.map((instance) => [instance.snapshot.definition.id, toTuple(instance.currentPosition)]),
-    ),
     camera: {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z],
@@ -413,12 +434,69 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       starSeed: backgroundBackdrop.starSeed,
       layerCount: backgroundBackdrop.layerCount,
     },
+    visuals: {
+      sun: {
+        radius: sunRadius,
+        glowRadius: sunRadius * SUN_GLOW_RADIUS_RATIO,
+        glowOpacity: sunGlowMaterial.opacity,
+      },
+      saturn: {
+        radius: saturnInstance?.currentRadius ?? 0,
+        ringTiltDeg: SATURN_RING_TILT_DEG,
+        ringInnerRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_INNER_RATIO,
+        ringOuterRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_OUTER_RATIO,
+        ringOpacity: saturnInstance?.ringMaterial?.opacity ?? 0,
+      },
+    },
+  };
+
+  const updateCameraState = () => {
+    testState.camera = {
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z],
+    };
+  };
+
+  const focusCamera = (target: Vector3, framingRadius: number) => {
+    const safeRadius = Math.max(framingRadius, 0.12);
+
+    orbitControls.target.copy(target);
+    camera.position.set(
+      target.x + safeRadius * 5.4,
+      target.y + safeRadius * 2.1,
+      target.z + safeRadius * 6.6,
+    );
+    orbitControls.update();
+    updateCameraState();
+  };
+
+  const framePlanet = (planetId: string) => {
+    stopAutoMotion();
+
+    if (planetId === "sun") {
+      focusCamera(sunMesh.position, sunRadius * SUN_GLOW_RADIUS_RATIO);
+      return true;
+    }
+
+    const instance = planetInstanceById.get(planetId);
+
+    if (!instance) {
+      return false;
+    }
+
+    const framingRadius = planetId === "saturn"
+      ? instance.currentRadius * SATURN_RING_OUTER_RATIO
+      : instance.currentRadius;
+
+    focusCamera(instance.anchor.position, framingRadius);
+    return true;
   };
 
   window.__planetariumTestApi = {
     getState() {
       return structuredClone(testState);
     },
+    framePlanet,
   };
 
   const updateFocus = () => {
@@ -430,24 +508,11 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     testState.hoveredPlanetId = hoveredPlanetId;
   };
 
-  const applyCameraPose = (position: Vector3, target: Vector3) => {
-    camera.position.copy(position);
-    orbitControls.target.copy(target);
-    camera.lookAt(target);
-  };
-
-  const getPlanetTargetPosition = (instance: PlanetMeshInstance): Vector3 => {
-    return scaleMode === "true"
-      ? instance.snapshot.position
-      : instance.visiblePosition;
-  };
-
-  const getFocusDistance = (instance: PlanetMeshInstance): number => {
-    if (scaleMode === "true") {
-      return clamp(instance.snapshot.heliocentricDistanceAu * 0.08, 0.45, 1.25);
-    }
-
-    return clamp(instance.snapshot.visibleRadiusAu * 24, 1.6, 3.9);
+  const setScaleMode = (mode: ScaleMode) => {
+    scaleMode = mode;
+    options.controls.setScaleMode(mode);
+    testState.scaleMode = mode;
+    document.body.dataset.scaleMode = mode;
   };
 
   const stopAutoMotion = () => {
@@ -461,83 +526,16 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     flushControlMotion(camera, orbitControls);
   };
 
-  const focusPlanet = (planetId: string) => {
-    const instance = planetById.get(planetId);
-
-    if (!instance) {
-      return;
-    }
-
-    stopAutoMotion();
-    selectedPlanetId = planetId;
-    updateFocus();
-
-    const target = getPlanetTargetPosition(instance).clone();
-    const preferredDirection = camera.position.clone().sub(orbitControls.target);
-
-    if (preferredDirection.lengthSq() < 1e-6) {
-      preferredDirection.set(0.42, 0.22, 1);
-    }
-
-    preferredDirection.normalize().lerp(new Vector3(0.36, 0.18, 1).normalize(), 0.18).normalize();
-
-    const focusDistance = getFocusDistance(instance);
-    const endPosition = target.clone()
-      .add(preferredDirection.multiplyScalar(focusDistance))
-      .add(new Vector3(0, focusDistance * 0.14, 0));
-
-    if (options.testMode) {
-      cameraAnimation = null;
-      orbitControls.enabled = true;
-      applyCameraPose(endPosition, target);
-      orbitControls.update();
-      return;
-    }
-
-    cameraAnimation = {
-      startPosition: camera.position.clone(),
-      endPosition,
-      startTarget: orbitControls.target.clone(),
-      endTarget: target,
-      progress: 0,
-    };
-    orbitControls.autoRotate = false;
-    orbitControls.enabled = false;
-  };
-
-  const togglePlanetSelection = (planetId: string) => {
+  const selectPlanet = (planetId: string) => {
     stopAutoMotion();
     selectedPlanetId = selectedPlanetId === planetId ? null : planetId;
     updateFocus();
   };
 
-  const setScaleMode = (mode: ScaleMode) => {
-    stopAutoMotion();
-    scaleMode = mode;
-    options.controls.setScaleMode(mode);
-    testState.scaleMode = mode;
-    document.body.dataset.scaleMode = mode;
-
-    if (selectedPlanetId) {
-      focusPlanet(selectedPlanetId);
-    }
-  };
-
-  const applyAlignmentLayout = (layout: AlignmentLayout) => {
-    alignmentGeometry.setFromPoints([
-      new Vector3(0, 0, 0),
-      layout.axisDirection.clone().multiplyScalar(layout.axisLengthAu),
-    ]);
-    alignmentLine.computeLineDistances();
-    alignmentDotsGeometry.setFromPoints(createAlignmentDotPoints(
-      layout.axisDirection,
-      layout.axisLengthAu,
-      1.6,
-    ));
-    tickGeometry.setFromPoints(layout.tickPoints);
-  };
-
   options.controls.setScaleMode(scaleMode);
+  options.overlay.bindPlanetSelection((planetId) => {
+    selectPlanet(planetId);
+  });
 
   renderer.domElement.addEventListener("pointermove", (event: PointerEvent) => {
     const bounds = renderer.domElement.getBoundingClientRect();
@@ -553,15 +551,11 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
 
   renderer.domElement.addEventListener("click", () => {
     if (hoveredPlanetId) {
-      togglePlanetSelection(hoveredPlanetId);
+      selectPlanet(hoveredPlanetId);
     }
   });
   renderer.domElement.addEventListener("wheel", stopAutoMotion, { passive: true });
-  orbitControls.addEventListener("start", () => {
-    stopAutoMotion();
-    cameraAnimation = null;
-    orbitControls.enabled = true;
-  });
+  orbitControls.addEventListener("start", stopAutoMotion);
 
   const onResize = () => {
     viewport = {
@@ -575,7 +569,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     renderer.setPixelRatio(options.testMode ? 1 : Math.min(window.devicePixelRatio, 2));
 
     if (!autoMotionStopped) {
-      framing = computeCameraFraming(orderedForAxis, camera);
+      framing = computeCameraFraming(orderedForAxis.map((instance) => instance.snapshot), camera);
       applyFraming(camera, orbitControls, framing, introElapsedSeconds, options.testMode);
     }
   };
@@ -585,79 +579,13 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const renderFrame = () => {
     const frameDelta = options.testMode ? 0 : Math.min(clock.getDelta(), 0.1);
     const delta = options.testMode ? 1 : Math.min(frameDelta * 5.5, 1);
-    const geometryLerpAmount = options.testMode ? 1 : (delta * 0.18 + 0.08);
-    const positionLerpAmount = options.testMode ? 1 : (delta * 0.22 + 0.08);
-
-    for (const orbitInstance of orbitInstances) {
-      const targetPoints = scaleMode === "true"
-        ? orbitInstance.truePoints
-        : orbitInstance.visiblePoints;
-
-      for (let pointIndex = 0; pointIndex < orbitInstance.currentPoints.length; pointIndex += 1) {
-        const currentPoint = orbitInstance.currentPoints[pointIndex];
-        const targetPoint = targetPoints[pointIndex];
-
-        if (currentPoint && targetPoint) {
-          currentPoint.lerp(targetPoint, geometryLerpAmount);
-        }
-      }
-
-      orbitInstance.geometry.setFromPoints(orbitInstance.currentPoints);
-      orbitInstance.geometry.computeBoundingSphere();
-    }
-
-    const displayPositions: Record<string, [number, number, number]> = {};
-    const displayDistances: Record<string, number> = {};
-
-    for (const instance of planetInstances) {
-      const targetRadius = scaleMode === "true"
-        ? instance.snapshot.trueRadiusAu
-        : instance.snapshot.visibleRadiusAu;
-      const targetPosition = getPlanetTargetPosition(instance);
-
-      instance.currentRadius = options.testMode
-        ? targetRadius
-        : lerp(instance.currentRadius, targetRadius, positionLerpAmount);
-      instance.currentPosition.lerp(targetPosition, positionLerpAmount);
-
-      instance.anchor.position.copy(instance.currentPosition);
-      instance.mesh.scale.setScalar(instance.currentRadius);
-
-      displayPositions[instance.snapshot.definition.id] = toTuple(instance.currentPosition);
-      displayDistances[instance.snapshot.definition.id] = instance.currentPosition.length();
-    }
-
-    alignmentLayout = createAlignmentLayout(orderedForAxis);
-    applyAlignmentLayout(alignmentLayout);
-
-    const targetSunRadius = scaleMode === "true" ? sunRadii.trueRadiusAu : sunRadii.visibleRadiusAu;
-    sunRadius = options.testMode ? targetSunRadius : lerp(sunRadius, targetSunRadius, delta * 0.2 + 0.08);
-    sunMesh.scale.setScalar(sunRadius);
 
     if (!options.testMode && !autoMotionStopped && introElapsedSeconds < INITIAL_FRAME_DURATION_SECONDS) {
       introElapsedSeconds = Math.min(introElapsedSeconds + frameDelta, INITIAL_FRAME_DURATION_SECONDS);
-      framing = computeCameraFraming(orderedForAxis, camera);
       applyFraming(camera, orbitControls, framing, introElapsedSeconds, false);
 
       if (introElapsedSeconds >= INITIAL_FRAME_DURATION_SECONDS) {
         orbitControls.autoRotate = true;
-      }
-    }
-
-    if (cameraAnimation) {
-      cameraAnimation.progress = options.testMode
-        ? 1
-        : Math.min(cameraAnimation.progress + frameDelta / 0.95, 1);
-
-      const eased = easeInOutCubic(cameraAnimation.progress);
-      applyCameraPose(
-        cameraAnimation.startPosition.clone().lerp(cameraAnimation.endPosition, eased),
-        cameraAnimation.startTarget.clone().lerp(cameraAnimation.endTarget, eased),
-      );
-
-      if (cameraAnimation.progress >= 1) {
-        cameraAnimation = null;
-        orbitControls.enabled = true;
       }
     }
 
@@ -671,25 +599,52 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     const displayedLabels = [];
 
     for (const instance of planetInstances) {
-      const isFocused = instance.snapshot.definition.id === selectedPlanetId
-        || instance.snapshot.definition.id === hoveredPlanetId;
+      const isFocused = instance.snapshot.definition.id === selectedPlanetId || instance.snapshot.definition.id === hoveredPlanetId;
+      const targetRadius = scaleMode === "true"
+        ? instance.snapshot.trueRadiusAu
+        : instance.snapshot.visibleRadiusAu;
+      instance.currentRadius = options.testMode
+        ? targetRadius
+        : lerp(instance.currentRadius, targetRadius, delta * 0.22 + 0.08);
+      instance.mesh.scale.setScalar(instance.currentRadius);
+
       const baseEmissive = new Color(instance.snapshot.definition.visual.accentColor);
       const emissiveIntensity = instance.snapshot.definition.id === selectedPlanetId
         ? 0.28
         : instance.snapshot.definition.id === hoveredPlanetId
           ? 0.18
           : 0.04;
-
       instance.material.emissive.copy(baseEmissive);
       instance.material.emissiveIntensity = emissiveIntensity;
       instance.material.needsUpdate = false;
 
+      if (instance.ringMesh && instance.ringMaterial) {
+        instance.ringMesh.scale.setScalar(instance.currentRadius);
+        instance.ringMaterial.emissiveIntensity = isFocused ? 0.09 : 0.05;
+      }
+
+      const labelRadius = instance.snapshot.definition.id === "saturn"
+        ? instance.currentRadius * SATURN_RING_OUTER_RATIO
+        : instance.currentRadius;
+      const labelOffset = instance.snapshot.definition.id === "saturn"
+        ? Math.max(
+            instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE),
+            labelRadius * (isFocused ? 1.24 : 1.08),
+          )
+        : instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE);
+
       displayedLabels.push({
         id: instance.snapshot.definition.id,
         label: instance.snapshot.definition.label,
-        position: instance.currentPosition.clone().add(new Vector3(0, instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE), 0)),
+        position: instance.snapshot.position.clone().add(new Vector3(0, labelOffset, 0)),
       });
     }
+
+    const targetSunRadius = scaleMode === "true" ? sunRadii.trueRadiusAu : sunRadii.visibleRadiusAu;
+    sunRadius = options.testMode ? targetSunRadius : lerp(sunRadius, targetSunRadius, delta * 0.2 + 0.08);
+    sunMesh.scale.setScalar(sunRadius);
+    const sunGlowRadius = sunRadius * SUN_GLOW_RADIUS_RATIO;
+    sunGlow.scale.set(sunGlowRadius * 2, sunGlowRadius * 2, 1);
 
     options.overlay.syncPlanetLabels(displayedLabels, camera, viewport, {
       hoveredId: hoveredPlanetId,
@@ -701,18 +656,18 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     backgroundBackdrop.group.position.copy(camera.position);
     renderer.render(scene, camera);
 
-    testState.alignment = {
-      axisDirection: toTuple(alignmentLayout.axisDirection),
-      axisLengthAu: alignmentLayout.axisLengthAu,
-      connectorCount: alignmentLayout.axisConnectorCount,
-      orderedPlanetIds: alignmentLayout.orderedPlanetIds,
-      offsetByPlanetId: { ...alignmentLayout.offsetByPlanetId },
+    updateCameraState();
+    testState.visuals.sun = {
+      radius: sunRadius,
+      glowRadius: sunGlowRadius,
+      glowOpacity: sunGlowMaterial.opacity,
     };
-    testState.planetDisplayPositions = displayPositions;
-    testState.planetDisplayDistancesAu = displayDistances;
-    testState.camera = {
-      position: [camera.position.x, camera.position.y, camera.position.z],
-      target: [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z],
+    testState.visuals.saturn = {
+      radius: saturnInstance?.currentRadius ?? 0,
+      ringTiltDeg: SATURN_RING_TILT_DEG,
+      ringInnerRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_INNER_RATIO,
+      ringOuterRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_OUTER_RATIO,
+      ringOpacity: saturnInstance?.ringMaterial?.opacity ?? 0,
     };
     testState.ready = true;
     document.body.dataset.sceneReady = "true";
@@ -722,7 +677,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   renderFrame();
 
   return {
-    focusPlanet,
+    selectPlanet,
     setScaleMode,
   };
 }
@@ -871,10 +826,6 @@ function createStarSpriteTexture(): CanvasTexture {
   return texture;
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(Math.max(value, minimum), maximum);
-}
-
 function applyFraming(
   camera: PerspectiveCamera,
   orbitControls: OrbitControls,
@@ -890,9 +841,10 @@ function applyFraming(
   camera.lookAt(framing.target);
 }
 
-function computeCameraFraming(orderedPlanets: PlanetMeshInstance[], camera: PerspectiveCamera): CameraFraming {
-  const target = orderedPlanets[Math.floor(orderedPlanets.length / 2)]?.currentPosition.clone() ?? new Vector3(0, 0, 0);
-  const furthest = orderedPlanets.at(-1)?.currentPosition.clone() ?? new Vector3(0, 0, 1);
+function computeCameraFraming(snapshots: PlanetSnapshot[], camera: PerspectiveCamera): CameraFraming {
+  const ordered = [...snapshots].sort((left, right) => left.heliocentricDistanceAu - right.heliocentricDistanceAu);
+  const target = ordered[Math.floor(ordered.length / 2)]?.position.clone() ?? new Vector3(0, 0, 0);
+  const furthest = ordered.at(-1)?.position.clone() ?? new Vector3(0, 0, 1);
   const alignmentAxis = furthest.lengthSq() > 0 ? furthest.normalize() : new Vector3(0, 0, 1);
   const worldUp = new Vector3(0, 1, 0);
   const lateralAxis = new Vector3().crossVectors(worldUp, alignmentAxis);
@@ -915,9 +867,7 @@ function computeCameraFraming(orderedPlanets: PlanetMeshInstance[], camera: Pers
   const up = new Vector3().crossVectors(right, forward).normalize();
   const framingPoints = [
     new Vector3(0, 0, 0),
-    ...orderedPlanets.map((instance) => (
-      instance.currentPosition.clone().add(new Vector3(0, instance.currentRadius * PLANET_LABEL_OFFSET_SCALE, 0))
-    )),
+    ...ordered.map((snapshot) => snapshot.position.clone().add(new Vector3(0, snapshot.visibleRadiusAu * PLANET_LABEL_OFFSET_SCALE, 0))),
   ];
 
   const verticalFov = camera.fov * (Math.PI / 180);
@@ -975,18 +925,13 @@ function easeOutCubic(value: number): number {
   return 1 - ((1 - clamped) ** 3);
 }
 
-function easeInOutCubic(value: number): number {
-  return value < 0.5
-    ? 4 * value ** 3
-    : 1 - Math.pow(-2 * value + 2, 3) / 2;
-}
-
 function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentLayout {
   const axisDirection = getDominantAlignmentDirection(orderedPlanets);
-  const furthestProjectionAu = orderedPlanets.reduce((maximum, instance) => {
-    return Math.max(maximum, instance.currentPosition.dot(axisDirection));
-  }, 0);
-  const axisLengthAu = furthestProjectionAu + Math.max(1.25, furthestProjectionAu * 0.04);
+  const plutoDistanceAu = orderedPlanets.find((instance) => instance.snapshot.definition.id === "pluto")
+    ?.snapshot.heliocentricDistanceAu
+    ?? orderedPlanets.at(-1)?.snapshot.heliocentricDistanceAu
+    ?? 0;
+  const axisLengthAu = plutoDistanceAu + Math.max(1.25, plutoDistanceAu * 0.04);
   const labelNormal = getStableNormal(axisDirection);
   const maxTickLengthAu = Math.max(0.32, axisLengthAu * 0.026);
   const minTickLengthAu = 0.12;
@@ -995,9 +940,9 @@ function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentL
   const axisGuideTicks: OverlayAlignmentGuide["ticks"] = [];
 
   for (const instance of orderedPlanets) {
-    const projectedDistanceAu = Math.max(0, instance.currentPosition.dot(axisDirection));
+    const projectedDistanceAu = Math.max(0, instance.snapshot.position.dot(axisDirection));
     const axisAnchor = axisDirection.clone().multiplyScalar(projectedDistanceAu);
-    const offsetVector = instance.currentPosition.clone().sub(axisAnchor);
+    const offsetVector = instance.snapshot.position.clone().sub(axisAnchor);
     const actualOffsetAu = offsetVector.length();
     offsetByPlanetId[instance.snapshot.definition.id] = actualOffsetAu;
 
@@ -1025,11 +970,9 @@ function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentL
       return [];
     }
 
-    const currentDistanceAu = Math.max(0, instance.currentPosition.dot(axisDirection));
-    const nextDistanceAu = Math.max(0, next.currentPosition.dot(axisDirection));
     const gapAu = next.snapshot.heliocentricDistanceAu - instance.snapshot.heliocentricDistanceAu;
-    const midpointDistanceAu = currentDistanceAu + (nextDistanceAu - currentDistanceAu) * 0.5;
-    const offsetMagnitudeAu = 0.82 + Math.min(Math.abs(nextDistanceAu - currentDistanceAu) * 0.06, 0.46);
+    const midpointDistanceAu = instance.snapshot.heliocentricDistanceAu + gapAu * 0.5;
+    const offsetMagnitudeAu = 0.82 + Math.min(gapAu * 0.06, 0.46);
     const side = index % 2 === 0 ? 1 : -1;
     const position = axisDirection.clone()
       .multiplyScalar(midpointDistanceAu)
@@ -1062,37 +1005,24 @@ function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentL
 
 function getDominantAlignmentDirection(orderedPlanets: PlanetMeshInstance[]): Vector3 {
   const seedDirection = orderedPlanets.reduce((direction, instance) => {
-    const sample = instance.currentPosition.lengthSq() > 0
-      ? instance.currentPosition.clone().normalize()
-      : new Vector3(0, 0, 0);
-    return direction.add(sample);
+    return direction.add(instance.snapshot.position.clone().normalize());
   }, new Vector3(0, 0, 0));
 
   const dominantPositions = orderedPlanets
-    .map((instance) => instance.currentPosition)
-    .filter((position) => position.lengthSq() > 0 && position.clone().normalize().dot(seedDirection) >= 0);
+    .map((instance) => instance.snapshot.position)
+    .filter((position) => position.clone().normalize().dot(seedDirection) >= 0);
   const sourcePositions = dominantPositions.length > 0
     ? dominantPositions
-    : orderedPlanets.map((instance) => instance.currentPosition);
+    : orderedPlanets.map((instance) => instance.snapshot.position);
   const axisDirection = sourcePositions.reduce((direction, position) => {
-    if (position.lengthSq() === 0) {
-      return direction;
-    }
-
     return direction.add(position.clone().normalize());
   }, new Vector3(0, 0, 0));
 
   if (axisDirection.lengthSq() < 1e-6) {
-    return orderedPlanets.at(-1)?.currentPosition.clone().normalize() ?? new Vector3(0, 0, -1);
+    return orderedPlanets.at(-1)?.snapshot.position.clone().normalize() ?? new Vector3(0, 0, -1);
   }
 
-  axisDirection.normalize();
-
-  if ((orderedPlanets.at(-1)?.currentPosition.dot(axisDirection) ?? 0) < 0) {
-    axisDirection.negate();
-  }
-
-  return axisDirection;
+  return axisDirection.normalize();
 }
 
 function getStableNormal(axisDirection: Vector3): Vector3 {
@@ -1123,8 +1053,4 @@ function createAlignmentDotPoints(
   }
 
   return points;
-}
-
-function toTuple(vector: Vector3): [number, number, number] {
-  return [vector.x, vector.y, vector.z];
 }
