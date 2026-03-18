@@ -1,5 +1,6 @@
 import {
   ACESFilmicToneMapping,
+  AdditiveBlending,
   AmbientLight,
   BackSide,
   BufferGeometry,
@@ -7,6 +8,7 @@ import {
   Clock,
   ClampToEdgeWrapping,
   Color,
+  DoubleSide,
   Float32BufferAttribute,
   Group,
   LinearFilter,
@@ -23,10 +25,13 @@ import {
   Points,
   PointsMaterial,
   Raycaster,
+  RingGeometry,
   Scene,
   ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
+  Sprite,
+  SpriteMaterial,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -47,7 +52,7 @@ import {
   TARGET_JULIAN_DATE,
 } from "./planets";
 import { createMulberry32 } from "./random";
-import { createPlanetTexture } from "./textures";
+import { createPlanetTexture, createSaturnRingTexture, createSunGlowTexture } from "./textures";
 import type { OverlayAlignmentGuide, OverlayLayer } from "./ui/overlay";
 
 interface PlanetariumSceneOptions {
@@ -65,6 +70,8 @@ interface PlanetMeshInstance {
   visiblePosition: Vector3;
   currentPosition: Vector3;
   currentRadius: number;
+  ringMesh: Mesh | null;
+  ringMaterial: MeshStandardMaterial | null;
 }
 
 interface OrbitLineInstance {
@@ -133,6 +140,20 @@ interface TestApiState {
     starSeed: number;
     layerCount: number;
   };
+  visuals: {
+    sun: {
+      radius: number;
+      glowRadius: number;
+      glowOpacity: number;
+    };
+    saturn: {
+      radius: number;
+      ringTiltDeg: number;
+      ringInnerRadius: number;
+      ringOuterRadius: number;
+      ringOpacity: number;
+    };
+  };
 }
 
 interface BackgroundLayerConfig {
@@ -153,6 +174,7 @@ declare global {
   interface Window {
     __planetariumTestApi?: {
       getState(): TestApiState;
+      framePlanet(planetId: string): boolean;
     };
   }
 }
@@ -176,6 +198,11 @@ const STARFIELD_TONES = [
   new Color("#dfeaff"),
   new Color("#d2e1ff"),
 ] as const;
+const SATURN_RING_INNER_RATIO = 1.38;
+const SATURN_RING_OUTER_RATIO = 2.35;
+const SATURN_RING_TILT_DEG = 26.7;
+const SATURN_RING_TILT_RADIANS = (SATURN_RING_TILT_DEG * Math.PI) / 180;
+const SUN_GLOW_RADIUS_RATIO = 3.2;
 
 export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   focusPlanet(planetId: string): void;
@@ -220,8 +247,22 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const sunMesh = new Mesh(sunGeometry, sunMaterial);
   scene.add(sunMesh);
 
+  const sunGlowMaterial = new SpriteMaterial({
+    map: createSunGlowTexture(),
+    color: new Color("#ffb35a"),
+    transparent: true,
+    opacity: 0.56,
+    blending: AdditiveBlending,
+    depthWrite: false,
+  });
+  sunGlowMaterial.toneMapped = false;
+
+  const sunGlow = new Sprite(sunGlowMaterial);
+  scene.add(sunGlow);
+
   const snapshots = getPlanetSnapshots(TARGET_JULIAN_DATE);
   const planetGeometry = new SphereGeometry(1, 64, 32);
+  const saturnRingGeometry = new RingGeometry(SATURN_RING_INNER_RATIO, SATURN_RING_OUTER_RATIO, 128, 12);
   const planetInstances: PlanetMeshInstance[] = [];
   const planetMeshes: Mesh[] = [];
   const orbitInstances: OrbitLineInstance[] = [];
@@ -264,7 +305,38 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     const visiblePosition = getDisplayPosition(snapshot.position, "visible");
     const anchor = new Group();
     anchor.position.copy(visiblePosition);
-    anchor.add(mesh);
+    let ringMesh: Mesh | null = null;
+    let ringMaterial: MeshStandardMaterial | null = null;
+
+    if (snapshot.definition.id === "saturn") {
+      const tiltedGroup = new Group();
+      tiltedGroup.rotation.z = SATURN_RING_TILT_RADIANS;
+
+      ringMaterial = new MeshStandardMaterial({
+        map: createSaturnRingTexture(SATURN_RING_INNER_RATIO, SATURN_RING_OUTER_RATIO),
+        color: 0xffffff,
+        roughness: 0.94,
+        metalness: 0,
+        emissive: new Color("#f3d8ab"),
+        emissiveIntensity: 0.05,
+        transparent: true,
+        opacity: 0.88,
+        side: DoubleSide,
+        alphaTest: 0.02,
+        depthWrite: false,
+      });
+      ringMesh = new Mesh(saturnRingGeometry, ringMaterial);
+      ringMesh.userData.planetId = snapshot.definition.id;
+      ringMesh.rotation.x = Math.PI / 2;
+
+      tiltedGroup.add(mesh);
+      tiltedGroup.add(ringMesh);
+      anchor.add(tiltedGroup);
+      planetMeshes.push(ringMesh);
+    } else {
+      anchor.add(mesh);
+    }
+
     scene.add(anchor);
 
     const instance: PlanetMeshInstance = {
@@ -275,12 +347,16 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       visiblePosition,
       currentPosition: visiblePosition.clone(),
       currentRadius: snapshot.visibleRadiusAu,
+      ringMesh,
+      ringMaterial,
     };
 
     planetInstances.push(instance);
     planetMeshes.push(mesh);
     planetById.set(snapshot.definition.id, instance);
   }
+
+  const saturnInstance = planetById.get("saturn") ?? null;
 
   const orderedForAxis = [...planetInstances].sort(
     (left, right) => left.snapshot.heliocentricDistanceAu - right.snapshot.heliocentricDistanceAu,
@@ -413,11 +489,19 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       starSeed: backgroundBackdrop.starSeed,
       layerCount: backgroundBackdrop.layerCount,
     },
-  };
-
-  window.__planetariumTestApi = {
-    getState() {
-      return structuredClone(testState);
+    visuals: {
+      sun: {
+        radius: sunRadius,
+        glowRadius: sunRadius * SUN_GLOW_RADIUS_RATIO,
+        glowOpacity: sunGlowMaterial.opacity,
+      },
+      saturn: {
+        radius: saturnInstance?.currentRadius ?? 0,
+        ringTiltDeg: SATURN_RING_TILT_DEG,
+        ringInnerRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_INNER_RATIO,
+        ringOuterRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_OUTER_RATIO,
+        ringOpacity: saturnInstance?.ringMaterial?.opacity ?? 0,
+      },
     },
   };
 
@@ -443,11 +527,21 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   };
 
   const getFocusDistance = (instance: PlanetMeshInstance): number => {
+    const saturnRingRadius = instance.snapshot.definition.id === "saturn"
+      ? SATURN_RING_OUTER_RATIO
+      : 1;
+
     if (scaleMode === "true") {
-      return clamp(instance.snapshot.heliocentricDistanceAu * 0.08, 0.45, 1.25);
+      return Math.max(
+        clamp(instance.snapshot.heliocentricDistanceAu * 0.08, 0.45, 1.25),
+        instance.snapshot.trueRadiusAu * saturnRingRadius * 4.2,
+      );
     }
 
-    return clamp(instance.snapshot.visibleRadiusAu * 24, 1.6, 3.9);
+    return Math.max(
+      clamp(instance.snapshot.visibleRadiusAu * 24, 1.6, 3.9),
+      instance.snapshot.visibleRadiusAu * saturnRingRadius * 1.9,
+    );
   };
 
   const stopAutoMotion = () => {
@@ -503,6 +597,45 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     };
     orbitControls.autoRotate = false;
     orbitControls.enabled = false;
+  };
+
+  const framePlanet = (planetId: string): boolean => {
+    stopAutoMotion();
+    cameraAnimation = null;
+    orbitControls.enabled = true;
+
+    const target = planetId === "sun"
+      ? sunMesh.position.clone()
+      : planetById.get(planetId)?.currentPosition.clone();
+
+    if (!target) {
+      return false;
+    }
+
+    const framingRadius = planetId === "sun"
+      ? sunRadius * SUN_GLOW_RADIUS_RATIO
+      : planetId === "saturn"
+        ? (planetById.get(planetId)?.currentRadius ?? 0) * SATURN_RING_OUTER_RATIO
+        : planetById.get(planetId)?.currentRadius ?? 0;
+    const safeRadius = Math.max(framingRadius, 0.12);
+    const endPosition = target.clone().add(new Vector3(
+      safeRadius * 5.4,
+      safeRadius * 2.1,
+      safeRadius * 6.6,
+    ));
+
+    applyCameraPose(endPosition, target);
+    orbitControls.update();
+    return true;
+  };
+
+  window.__planetariumTestApi = {
+    getState() {
+      return structuredClone(testState);
+    },
+    framePlanet(planetId: string) {
+      return framePlanet(planetId);
+    },
   };
 
   const togglePlanetSelection = (planetId: string) => {
@@ -623,6 +756,14 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       instance.anchor.position.copy(instance.currentPosition);
       instance.mesh.scale.setScalar(instance.currentRadius);
 
+      if (instance.ringMesh && instance.ringMaterial) {
+        instance.ringMesh.scale.setScalar(instance.currentRadius);
+        instance.ringMaterial.emissiveIntensity = instance.snapshot.definition.id === selectedPlanetId
+          || instance.snapshot.definition.id === hoveredPlanetId
+          ? 0.09
+          : 0.05;
+      }
+
       displayPositions[instance.snapshot.definition.id] = toTuple(instance.currentPosition);
       displayDistances[instance.snapshot.definition.id] = instance.currentPosition.length();
     }
@@ -633,6 +774,8 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     const targetSunRadius = scaleMode === "true" ? sunRadii.trueRadiusAu : sunRadii.visibleRadiusAu;
     sunRadius = options.testMode ? targetSunRadius : lerp(sunRadius, targetSunRadius, delta * 0.2 + 0.08);
     sunMesh.scale.setScalar(sunRadius);
+    const sunGlowRadius = sunRadius * SUN_GLOW_RADIUS_RATIO;
+    sunGlow.scale.set(sunGlowRadius * 2, sunGlowRadius * 2, 1);
 
     if (!options.testMode && !autoMotionStopped && introElapsedSeconds < INITIAL_FRAME_DURATION_SECONDS) {
       introElapsedSeconds = Math.min(introElapsedSeconds + frameDelta, INITIAL_FRAME_DURATION_SECONDS);
@@ -683,11 +826,20 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       instance.material.emissive.copy(baseEmissive);
       instance.material.emissiveIntensity = emissiveIntensity;
       instance.material.needsUpdate = false;
+      const labelRadius = instance.snapshot.definition.id === "saturn"
+        ? instance.currentRadius * SATURN_RING_OUTER_RATIO
+        : instance.currentRadius;
+      const labelOffset = instance.snapshot.definition.id === "saturn"
+        ? Math.max(
+            instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE),
+            labelRadius * (isFocused ? 1.24 : 1.08),
+          )
+        : instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE);
 
       displayedLabels.push({
         id: instance.snapshot.definition.id,
         label: instance.snapshot.definition.label,
-        position: instance.currentPosition.clone().add(new Vector3(0, instance.currentRadius * (isFocused ? 2.5 : PLANET_LABEL_OFFSET_SCALE), 0)),
+        position: instance.currentPosition.clone().add(new Vector3(0, labelOffset, 0)),
       });
     }
 
@@ -713,6 +865,18 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     testState.camera = {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z],
+    };
+    testState.visuals.sun = {
+      radius: sunRadius,
+      glowRadius: sunGlowRadius,
+      glowOpacity: sunGlowMaterial.opacity,
+    };
+    testState.visuals.saturn = {
+      radius: saturnInstance?.currentRadius ?? 0,
+      ringTiltDeg: SATURN_RING_TILT_DEG,
+      ringInnerRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_INNER_RATIO,
+      ringOuterRadius: (saturnInstance?.currentRadius ?? 0) * SATURN_RING_OUTER_RATIO,
+      ringOpacity: saturnInstance?.ringMaterial?.opacity ?? 0,
     };
     testState.ready = true;
     document.body.dataset.sceneReady = "true";

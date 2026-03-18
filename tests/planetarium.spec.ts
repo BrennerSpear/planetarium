@@ -1,8 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("renders the 2161 alignment scene with deterministic controls", async ({ page }) => {
   await page.goto("/?test=1");
   await page.waitForSelector("body[data-scene-ready='true']");
+  await waitForStableFrame(page);
 
   const labels = page.locator("[data-planet-label]");
   const distanceLabels = page.locator("[data-distance-label]");
@@ -56,6 +57,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.planetDisplayDistancesAu.venus).toBeGreaterThan(initialState?.planetActualDistancesAu.venus ?? 0);
   expect(initialState?.planetDisplayDistancesAu.earth).toBeGreaterThan(initialState?.planetActualDistancesAu.earth ?? 0);
   expect(initialState?.planetDisplayDistancesAu.mars).toBeGreaterThan(initialState?.planetActualDistancesAu.mars ?? 0);
+  expect(initialState?.visuals.saturn.ringTiltDeg).toBeCloseTo(26.7, 1);
+  expect(initialState?.visuals.saturn.ringOuterRadius).toBeGreaterThan(initialState?.visuals.saturn.radius ?? 0);
+  expect(initialState?.visuals.sun.glowRadius).toBeGreaterThan(initialState?.visuals.sun.radius ?? 0);
 
   const labelRects = await labels.evaluateAll((nodes) => nodes.map((node) => {
     const element = node as HTMLElement;
@@ -85,9 +89,6 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await page.getByRole("button", { name: "Earth" }).click();
   await expect(page.locator("[data-focus-heading]")).toHaveText("Earth");
   await expect(page.locator("[data-info-category]")).toHaveText("Terrestrial");
-  await expect(page.locator(".info-panel")).toHaveAttribute("data-focus-source", "selected");
-  await expect(focusAccent).toBeVisible();
-  await expect(focusAccent).toHaveCSS("background-color", "rgb(158, 212, 255)");
 
   const focusedState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(focusedState?.selectedPlanetId).toBe("earth");
@@ -102,6 +103,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   await page.getByRole("button", { name: "True scale" }).click();
   await expect(page.locator("body")).toHaveAttribute("data-scale-mode", "true");
+  await waitForStableFrame(page);
 
   await expect.poll(async () => {
     const state = await page.evaluate(() => window.__planetariumTestApi?.getState());
@@ -109,8 +111,23 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   }).toBeLessThan(0.00001);
 
   const trueScaleState = await page.evaluate(() => window.__planetariumTestApi?.getState());
+  expect(trueScaleState?.visuals.saturn.ringOuterRadius).toBeLessThan(
+    initialState?.visuals.saturn.ringOuterRadius ?? Number.POSITIVE_INFINITY,
+  );
+  expect(trueScaleState?.visuals.sun.glowRadius).toBeLessThan(
+    initialState?.visuals.sun.glowRadius ?? Number.POSITIVE_INFINITY,
+  );
 
-  const beforeCamera = trueScaleState?.camera;
+  await page.locator("[data-planet-label='earth']").evaluate((node) => {
+    (node as HTMLButtonElement).click();
+  });
+  await expect(page.locator("[data-focus-heading]")).toHaveText("Earth");
+  await expect(page.locator("[data-info-category]")).toHaveText("Terrestrial");
+  await expect(page.locator(".info-panel")).toHaveAttribute("data-focus-source", "selected");
+  await expect(focusAccent).toBeVisible();
+  await expect(focusAccent).toHaveCSS("background-color", "rgb(158, 212, 255)");
+
+  const beforeCamera = await page.evaluate(() => window.__planetariumTestApi?.getState().camera);
 
   await page.mouse.move(1230, 760);
   await page.mouse.wheel(0, -420);
@@ -123,6 +140,48 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-true-scale-earth-orbit.png");
 });
+
+test("renders Saturn rings and Sun glow closeups deterministically", async ({ page }) => {
+  await page.goto("/?test=1");
+  await page.waitForSelector("body[data-scene-ready='true']");
+  await waitForStableFrame(page);
+  await hideUiChromeForCapture(page);
+
+  await framePlanet(page, "saturn");
+  const saturnState = await page.evaluate(() => window.__planetariumTestApi?.getState());
+  expect(saturnState?.visuals.saturn.ringOpacity).toBeGreaterThan(0.8);
+  await expect(page.locator("[data-scene-root]")).toHaveScreenshot("planetarium-saturn-rings.png");
+
+  await framePlanet(page, "sun");
+  const sunState = await page.evaluate(() => window.__planetariumTestApi?.getState());
+  expect(sunState?.visuals.sun.glowOpacity).toBeGreaterThan(0.5);
+  await expect(page.locator("[data-scene-root]")).toHaveScreenshot("planetarium-sun-glow.png");
+});
+
+async function framePlanet(page: Page, planetId: string): Promise<void> {
+  const framed = await page.evaluate((targetPlanetId) => window.__planetariumTestApi?.framePlanet(targetPlanetId), planetId);
+  expect(framed).toBe(true);
+  await waitForStableFrame(page);
+}
+
+async function waitForStableFrame(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+  });
+}
+
+async function hideUiChromeForCapture(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>("[data-hud-root]")?.style.setProperty("display", "none");
+    document.querySelector<HTMLElement>("[data-overlay-root]")?.style.setProperty("display", "none");
+  });
+}
 
 function distanceBetween(
   left: [number, number, number] | undefined,
