@@ -50,7 +50,7 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
     },
     anomaly: {
       label: "View",
-      value: "A luminous path threads through the lineup while floating markers label the span between neighbors.",
+      value: "Orbit rings and floating planet names stay visible while you explore the lineup from any angle.",
     },
     note: {
       label: "Source",
@@ -132,8 +132,7 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
       <div>
         <p class="eyebrow">Guide</p>
         <p class="lede compact">
-          The glowing alignment path follows the planets in heliocentric order, and the floating markers show the
-          spacing between neighboring worlds.
+          Floating planet names and faint orbital rings keep the alignment legible while you pan, orbit, and zoom.
         </p>
       </div>
     </section>

@@ -7,10 +7,14 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   const labels = page.locator("[data-planet-label]");
   const distanceLabels = page.locator("[data-distance-label]");
+  const alignmentGuideLayer = page.locator("[data-alignment-guide-layer]");
+  const distanceLabelLayer = page.locator("[data-distance-label-layer]");
   const focusAccent = page.locator("[data-focus-accent]");
 
   await expect(labels).toHaveCount(8);
-  await expect(distanceLabels).toHaveCount(7);
+  await expect(distanceLabels).toHaveCount(0);
+  await expect(alignmentGuideLayer).toHaveCount(0);
+  await expect(distanceLabelLayer).toHaveCount(0);
   await expect(page.locator("[data-scale-toggle='visible']")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".helper-copy")).toHaveText(
     "Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.",
@@ -26,7 +30,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     "All eight planets share the same side of the Sun, arranged outward by heliocentric distance.",
   );
   await expect(page.locator(".footer-panel .lede")).toHaveText(
-    "The glowing alignment path follows the planets in heliocentric order, and the floating markers show the spacing between neighboring worlds.",
+    "Floating planet names and faint orbital rings keep the alignment legible while you pan, orbit, and zoom.",
   );
   await expect(focusAccent).toBeHidden();
 
@@ -36,9 +40,8 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.orbitCount).toBe(8);
   expect(initialState?.julianDate).toBe(2510487.5);
   expect(initialState?.labels).not.toContain("Pluto");
-  expect(initialState?.alignment.connectorCount).toBe(8);
-  expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(28);
-  expect(initialState?.alignment.axisLengthAu).toBeLessThan(31);
+  expect(initialState?.alignment.connectorCount).toBe(0);
+  expect(initialState?.alignment.axisLengthAu).toBe(0);
   expect(initialState?.background.starSeed).toBe(2161519);
   expect(initialState?.background.starCount).toBe(4210);
   expect(initialState?.background.layerCount).toBe(3);
@@ -57,6 +60,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.planetDisplayDistancesAu.venus).toBeGreaterThan(initialState?.planetActualDistancesAu.venus ?? 0);
   expect(initialState?.planetDisplayDistancesAu.earth).toBeGreaterThan(initialState?.planetActualDistancesAu.earth ?? 0);
   expect(initialState?.planetDisplayDistancesAu.mars).toBeGreaterThan(initialState?.planetActualDistancesAu.mars ?? 0);
+  expect(initialState?.visuals.saturn.radius).toBeGreaterThan(0.27);
   expect(initialState?.visuals.saturn.ringTiltDeg).toBeCloseTo(26.7, 1);
   expect(initialState?.visuals.saturn.ringOuterRadius).toBeGreaterThan(initialState?.visuals.saturn.radius ?? 0);
   expect(initialState?.visuals.sun.glowRadius).toBeGreaterThan(initialState?.visuals.sun.radius ?? 0);
