@@ -1,57 +1,153 @@
-type OverlayController = {
-  root: HTMLDivElement;
-  setReady: (ready: boolean) => void;
-  setCameraSummary: (summary: string) => void;
-};
+import { Camera, Vector3 } from "three";
 
-export function createOverlay(): OverlayController {
-  const root = document.createElement("div");
-  root.className = "hud";
-  root.dataset.testid = "overlay";
+export interface OverlayPlanetLabel {
+  id: string;
+  label: string;
+  position: Vector3;
+}
 
-  const status = document.createElement("div");
-  status.className = "hud__status";
-  status.dataset.testid = "render-status";
-  status.dataset.ready = "false";
-  status.textContent = "Booting scene";
+export interface OverlayDistanceLabel {
+  id: string;
+  label: string;
+  position: Vector3;
+}
 
-  const cameraSummary = document.createElement("strong");
-  cameraSummary.dataset.testid = "camera-summary";
-  cameraSummary.textContent = "0.00, 4.00, 16.00";
+export interface OverlayLayer {
+  bindPlanetSelection(handler: (planetId: string) => void): void;
+  syncPlanetLabels(
+    labels: OverlayPlanetLabel[],
+    camera: Camera,
+    viewport: { width: number; height: number },
+    state: { hoveredId: string | null; selectedId: string | null },
+  ): void;
+  syncDistanceLabels(
+    labels: OverlayDistanceLabel[],
+    camera: Camera,
+    viewport: { width: number; height: number },
+  ): void;
+}
 
+interface OverlayLayerOptions {
+  root: HTMLElement;
+}
+
+export function createOverlayLayer(options: OverlayLayerOptions): OverlayLayer {
+  const root = options.root;
   root.innerHTML = `
-    <p class="hud__eyebrow">Planetarium</p>
-    <h1 class="hud__title">Three.js Orbit Scaffold</h1>
-    <p class="hud__subtitle">
-      Bun + Vite + TypeScript scaffold with a deterministic render hook for Playwright.
-    </p>
-    <div class="hud__chips">
-      <span class="hud__chip">Orbit drag</span>
-      <span class="hud__chip">Wheel zoom</span>
-      <span class="hud__chip">Shift pan</span>
-    </div>
-    <div class="hud__meta">
-      <div>
-        <span class="hud__label">Render status</span>
-      </div>
-      <div>
-        <span class="hud__label">Camera position</span>
-      </div>
-    </div>
+    <div class="planet-label-layer" data-planet-label-layer></div>
+    <div class="distance-label-layer" data-distance-label-layer></div>
   `;
 
-  const metaRows = root.querySelectorAll(".hud__meta > div");
-  metaRows[0]?.append(status);
-  metaRows[1]?.append(cameraSummary);
+  const planetLabelLayer = root.querySelector<HTMLElement>("[data-planet-label-layer]");
+  const distanceLabelLayer = root.querySelector<HTMLElement>("[data-distance-label-layer]");
+
+  if (!planetLabelLayer || !distanceLabelLayer) {
+    throw new Error("Overlay layers did not initialize");
+  }
+
+  const planetButtons = new Map<string, HTMLButtonElement>();
+  const distanceNodes = new Map<string, HTMLDivElement>();
+  let selectionHandler: ((planetId: string) => void) | null = null;
+
+  const ensurePlanetButton = (label: OverlayPlanetLabel): HTMLButtonElement => {
+    const existing = planetButtons.get(label.id);
+
+    if (existing) {
+      existing.textContent = label.label;
+      return existing;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "planet-label";
+    button.dataset.planetLabel = label.id;
+    button.addEventListener("click", () => {
+      selectionHandler?.(label.id);
+    });
+    planetLabelLayer.append(button);
+    planetButtons.set(label.id, button);
+    button.textContent = label.label;
+    return button;
+  };
+
+  const ensureDistanceNode = (label: OverlayDistanceLabel): HTMLDivElement => {
+    const existing = distanceNodes.get(label.id);
+
+    if (existing) {
+      existing.textContent = label.label;
+      return existing;
+    }
+
+    const node = document.createElement("div");
+    node.className = "distance-label";
+    node.dataset.distanceLabel = label.id;
+    node.textContent = label.label;
+    distanceLabelLayer.append(node);
+    distanceNodes.set(label.id, node);
+    return node;
+  };
 
   return {
-    root,
-    setReady(ready) {
-      status.dataset.ready = String(ready);
-      status.textContent = ready ? "Scene ready" : "Booting scene";
+    bindPlanetSelection(handler) {
+      selectionHandler = handler;
     },
-    setCameraSummary(summary) {
-      cameraSummary.textContent = summary;
+    syncPlanetLabels(labels, camera, viewport, state) {
+      const seen = new Set<string>();
+
+      for (const label of labels) {
+        seen.add(label.id);
+        const button = ensurePlanetButton(label);
+        const isSelected = state.selectedId === label.id;
+        const isHovered = state.hoveredId === label.id;
+
+        button.dataset.selected = String(isSelected);
+        button.dataset.hovered = String(isHovered);
+        projectNode(button, label.position, camera, viewport, { yOffset: -10 });
+      }
+
+      for (const [id, button] of planetButtons) {
+        if (!seen.has(id)) {
+          button.remove();
+          planetButtons.delete(id);
+        }
+      }
+    },
+    syncDistanceLabels(labels, camera, viewport) {
+      const seen = new Set<string>();
+
+      for (const label of labels) {
+        seen.add(label.id);
+        const node = ensureDistanceNode(label);
+        projectNode(node, label.position, camera, viewport, { yOffset: 0 });
+      }
+
+      for (const [id, node] of distanceNodes) {
+        if (!seen.has(id)) {
+          node.remove();
+          distanceNodes.delete(id);
+        }
+      }
     },
   };
+}
+
+function projectNode(
+  node: HTMLElement,
+  worldPosition: Vector3,
+  camera: Camera,
+  viewport: { width: number; height: number },
+  options: { yOffset: number },
+): void {
+  const projected = worldPosition.clone().project(camera);
+  const isVisible = projected.z > -1 && projected.z < 1;
+  const x = (projected.x * 0.5 + 0.5) * viewport.width;
+  const y = (-projected.y * 0.5 + 0.5) * viewport.height + options.yOffset;
+
+  const insideViewport = x >= -80 && x <= viewport.width + 80 && y >= -80 && y <= viewport.height + 80;
+
+  node.hidden = !(isVisible && insideViewport);
+
+  if (!node.hidden) {
+    node.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+  }
 }
