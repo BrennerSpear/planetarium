@@ -1,0 +1,26 @@
+{
+  "name": "planetarium",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run build",
+    "test:unit": "bun test tests/planets.unit.test.js",
+    "test:e2e": "playwright test",
+    "test": "bun run test:unit && bun run test:e2e",
+    "test:update": "playwright test --update-snapshots"
+  },
+  "dependencies": {
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^24.12.0",
+    "@types/three": "^0.183.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}
