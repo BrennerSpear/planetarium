@@ -20,6 +20,11 @@ workspace:
 hooks:
   after_create: |
     git clone --depth 1 git@github.com:BrennerSpear/planetarium.git .
+    git config core.editor "cat"
+    git config merge.commit no-edit
+    git config mergetool.prompt false
+    export GIT_EDITOR=cat
+    export GIT_MERGE_AUTOEDIT=no
     bun install
   before_remove: |
     true
