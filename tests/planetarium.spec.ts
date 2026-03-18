@@ -25,6 +25,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.alignment.connectorCount).toBe(9);
   expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(45);
   expect(initialState?.alignment.axisLengthAu).toBeLessThan(48);
+  expect(initialState?.background.starSeed).toBe(2161519);
+  expect(initialState?.background.starCount).toBe(4210);
+  expect(initialState?.background.layerCount).toBe(3);
   expect(initialState?.alignment.orderedPlanetIds).toEqual([
     "mercury",
     "venus",
@@ -80,4 +83,6 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   const afterCamera = await page.evaluate(() => window.__planetariumTestApi?.getState().camera);
   expect(afterCamera).not.toEqual(beforeCamera);
+
+  await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-true-scale-earth-orbit.png");
 });

@@ -1,10 +1,15 @@
 import {
   ACESFilmicToneMapping,
   AmbientLight,
+  BackSide,
   BufferGeometry,
+  CanvasTexture,
   Clock,
+  ClampToEdgeWrapping,
   Color,
+  Float32BufferAttribute,
   Group,
+  LinearFilter,
   Line,
   LineBasicMaterial,
   LineDashedMaterial,
@@ -18,6 +23,7 @@ import {
   PointsMaterial,
   Raycaster,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
   SRGBColorSpace,
   Vector2,
@@ -37,6 +43,7 @@ import {
   TARGET_JULIAN_DATE,
   SUN_DEFINITION,
 } from "./planets";
+import { createMulberry32 } from "./random";
 import { createPlanetTexture } from "./textures";
 import type { OverlayAlignmentGuide, OverlayLayer } from "./ui/overlay";
 
@@ -97,6 +104,25 @@ interface TestApiState {
     position: [number, number, number];
     target: [number, number, number];
   };
+  background: {
+    starCount: number;
+    starSeed: number;
+    layerCount: number;
+  };
+}
+
+interface BackgroundLayerConfig {
+  count: number;
+  radius: number;
+  size: number;
+  brightnessRange: readonly [number, number];
+}
+
+interface BackgroundBackdrop {
+  group: Group;
+  starCount: number;
+  starSeed: number;
+  layerCount: number;
 }
 
 declare global {
@@ -115,13 +141,23 @@ const INITIAL_DOLLY_FACTOR = 1.12;
 const INITIAL_SIDE_DRIFT_RATIO = -0.04;
 const INITIAL_DROP_RATIO = -0.03;
 const AUTO_ROTATE_SPEED = 0.28;
+const STARFIELD_SEED = 2_161_519;
+const STARFIELD_LAYERS: readonly BackgroundLayerConfig[] = [
+  { count: 2_800, radius: 320, size: 1.15, brightnessRange: [0.42, 0.72] },
+  { count: 1_050, radius: 334, size: 1.65, brightnessRange: [0.62, 0.88] },
+  { count: 360, radius: 348, size: 2.2, brightnessRange: [0.78, 1] },
+];
+const STARFIELD_TONES = [
+  new Color("#f6fbff"),
+  new Color("#dfeaff"),
+  new Color("#d2e1ff"),
+] as const;
 
 export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   selectPlanet(planetId: string): void;
   setScaleMode(mode: ScaleMode): void;
 } {
   const scene = new Scene();
-  scene.background = new Color("#03070f");
 
   const renderer = new WebGLRenderer({
     antialias: true,
@@ -142,6 +178,8 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     0.01,
     500,
   );
+  const backgroundBackdrop = createBackgroundBackdrop();
+  scene.add(backgroundBackdrop.group);
 
   const ambientLight = new AmbientLight(0x6f8ac2, 0.24);
   scene.add(ambientLight);
@@ -275,6 +313,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   camera.position.copy(options.testMode ? framing.position : framing.introPosition);
   camera.up.copy(framing.up);
   camera.lookAt(framing.target);
+  backgroundBackdrop.group.position.copy(camera.position);
 
   const orbitControls = new OrbitControls(camera, renderer.domElement);
   orbitControls.target.copy(framing.target);
@@ -309,6 +348,11 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     camera: {
       position: [camera.position.x, camera.position.y, camera.position.z],
       target: [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z],
+    },
+    background: {
+      starCount: backgroundBackdrop.starCount,
+      starSeed: backgroundBackdrop.starSeed,
+      layerCount: backgroundBackdrop.layerCount,
     },
   };
 
@@ -455,6 +499,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     options.overlay.syncAlignmentGuide(alignmentLayout.axisGuide, camera, viewport);
     options.overlay.syncDistanceLabels(alignmentLayout.distanceLabels, camera, viewport);
 
+    backgroundBackdrop.group.position.copy(camera.position);
     renderer.render(scene, camera);
 
     testState.camera = {
@@ -476,6 +521,146 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
 
 function lerp(a: number, b: number, amount: number): number {
   return a + (b - a) * amount;
+}
+
+function createBackgroundBackdrop(): BackgroundBackdrop {
+  const group = new Group();
+  let starCount = 0;
+
+  const atmosphereMaterial = new ShaderMaterial({
+    side: BackSide,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    toneMapped: false,
+    uniforms: {},
+    vertexShader: `
+      varying vec3 vWorldDirection;
+      varying vec3 vViewDirection;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldDirection = normalize(worldPosition.xyz - cameraPosition);
+
+        vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+        vViewDirection = normalize(viewPosition.xyz);
+        gl_Position = projectionMatrix * viewPosition;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldDirection;
+      varying vec3 vViewDirection;
+
+      float glow(vec3 direction, vec3 center, float falloff) {
+        return pow(max(dot(normalize(direction), normalize(center)), 0.0), falloff);
+      }
+
+      void main() {
+        vec3 direction = normalize(vWorldDirection);
+        vec3 viewDirection = normalize(vViewDirection);
+
+        vec3 color = vec3(0.012, 0.017, 0.038);
+        float vertical = smoothstep(-0.22, 0.95, direction.y);
+        color += vec3(0.010, 0.026, 0.060) * pow(vertical, 1.7);
+        color += vec3(0.030, 0.018, 0.056) * glow(direction, vec3(-0.45, 0.28, -1.0), 7.0);
+        color += vec3(0.016, 0.034, 0.076) * glow(direction, vec3(0.62, -0.10, 0.74), 8.0);
+        color += vec3(0.012, 0.020, 0.040) * glow(direction, vec3(-0.20, -0.68, 0.40), 10.0);
+
+        float edge = 1.0 - clamp(abs(viewDirection.z), 0.0, 1.0);
+        float vignette = smoothstep(0.15, 0.92, edge);
+        color *= 1.0 - vignette * 0.18;
+
+        gl_FragColor = vec4(color, 0.92);
+      }
+    `,
+  });
+  const atmosphere = new Mesh(new SphereGeometry(360, 48, 24), atmosphereMaterial);
+  atmosphere.renderOrder = -20;
+  atmosphere.frustumCulled = false;
+  group.add(atmosphere);
+
+  const starSprite = createStarSpriteTexture();
+  const rng = createMulberry32(STARFIELD_SEED);
+
+  for (const layer of STARFIELD_LAYERS) {
+    const geometry = new BufferGeometry();
+    const positions = new Float32Array(layer.count * 3);
+    const colors = new Float32Array(layer.count * 3);
+
+    for (let starIndex = 0; starIndex < layer.count; starIndex += 1) {
+      const z = rng() * 2 - 1;
+      const theta = rng() * Math.PI * 2;
+      const radial = Math.sqrt(Math.max(0, 1 - z * z));
+      const radius = layer.radius * lerp(0.96, 1.04, rng());
+      const offset = starIndex * 3;
+
+      positions[offset] = Math.cos(theta) * radial * radius;
+      positions[offset + 1] = z * radius;
+      positions[offset + 2] = Math.sin(theta) * radial * radius;
+
+      const tone = STARFIELD_TONES[Math.floor(rng() * STARFIELD_TONES.length)] ?? STARFIELD_TONES[0];
+      const brightness = lerp(layer.brightnessRange[0], layer.brightnessRange[1], rng());
+      colors[offset] = tone.r * brightness;
+      colors[offset + 1] = tone.g * brightness;
+      colors[offset + 2] = tone.b * brightness;
+    }
+
+    geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new Float32BufferAttribute(colors, 3));
+
+    const material = new PointsMaterial({
+      size: layer.size,
+      sizeAttenuation: false,
+      map: starSprite,
+      transparent: true,
+      alphaTest: 0.04,
+      depthWrite: false,
+      depthTest: true,
+      vertexColors: true,
+      toneMapped: false,
+    });
+    const stars = new Points(geometry, material);
+    stars.renderOrder = -10;
+    stars.frustumCulled = false;
+    group.add(stars);
+    starCount += layer.count;
+  }
+
+  return {
+    group,
+    starCount,
+    starSeed: STARFIELD_SEED,
+    layerCount: STARFIELD_LAYERS.length,
+  };
+}
+
+function createStarSpriteTexture(): CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Unable to create star sprite texture");
+  }
+
+  const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+  gradient.addColorStop(0.32, "rgba(255, 255, 255, 0.9)");
+  gradient.addColorStop(0.72, "rgba(170, 204, 255, 0.28)");
+  gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+  return texture;
 }
 
 function applyFraming(
