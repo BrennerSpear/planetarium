@@ -161,9 +161,9 @@ Do NOT deploy. Symphony agents should only write code, tests, and open PRs.
 - `Todo` → queued; immediately transition to `In Progress` before active work.
   - Special case: if a PR is already attached, treat as feedback/rework loop.
 - `In Progress` → implementation actively underway.
-- `Human Review` → PR is attached and validated; waiting on human approval.
-- `Merging` → approved by human; rebase, merge the PR, then move to Done.
-- `Rework` → reviewer requested changes; fresh branch, fresh plan.
+- `Axel Review` → PR is attached and validated; waiting on Axel (AI reviewer) approval.
+- `Merging` → approved by Axel; rebase, merge the PR, then move to Done.
+- `Rework` → Axel requested changes; fresh branch, fresh plan.
 - `Done` → terminal state; no further action.
 
 ## Step 0: Route by current state
@@ -173,7 +173,7 @@ Do NOT deploy. Symphony agents should only write code, tests, and open PRs.
    - `Backlog` → stop; wait for human.
    - `Todo` → move to `In Progress`, create workpad, start execution.
    - `In Progress` → continue from existing workpad.
-   - `Human Review` → poll for review updates.
+   - `Axel Review` → poll for review updates.
    - `Merging` → rebase onto main, merge PR, move to Done.
    - `Rework` → close old PR, fresh branch from main, restart.
    - `Done` → shut down.
@@ -197,10 +197,10 @@ Do NOT deploy. Symphony agents should only write code, tests, and open PRs.
 6. Open PR with `symphony` label targeting `main`.
 7. Run PR feedback sweep (address all reviewer comments).
 8. Confirm tests pass on latest push.
-9. Move to `Human Review` only when all criteria are met.
+9. Move to `Axel Review` only when all criteria are met.
 
-## Step 3: Human Review → Merging → Done
+## Step 3: Axel Review → Merging → Done
 
-1. In `Human Review`: do not modify code. Poll for review.
+1. In `Axel Review`: do not modify code. Poll for review.
 2. If changes requested: move to `Rework`.
 3. If approved and moved to `Merging`: rebase, merge, move to `Done`.
