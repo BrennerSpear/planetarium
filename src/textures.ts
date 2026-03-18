@@ -6,6 +6,7 @@ import {
 } from "three";
 
 import type { PlanetDefinition } from "./planets";
+import { createMulberry32 } from "./random";
 
 const textureCache = new Map<string, CanvasTexture>();
 
@@ -127,7 +128,7 @@ function overlaySurfaceDetails(
   definition: PlanetDefinition,
   seed: number,
 ): void {
-  const rng = mulberry32(seed);
+  const rng = createMulberry32(seed);
 
   if (definition.visual.kind === "gas") {
     const spotColor = definition.visual.spotColor ?? "#cc7a4a";
@@ -285,16 +286,4 @@ function hashString(value: string): number {
   }
 
   return hash >>> 0;
-}
-
-function mulberry32(seed: number): () => number {
-  let current = seed;
-
-  return () => {
-    current += 0x6d2b79f5;
-    let t = current;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
-  };
 }
