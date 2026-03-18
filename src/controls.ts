@@ -81,8 +81,8 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
       <div>
         <p class="eyebrow">Guide</p>
         <p class="lede compact">
-          The pale spine line connects planets by heliocentric distance, and the floating markers show the spacing
-          between adjacent worlds along that line.
+          The dashed axis runs from the Sun toward the alignment and out past Pluto, while the AU markers show the
+          radial spacing between adjacent worlds along that guide.
         </p>
       </div>
     </section>
