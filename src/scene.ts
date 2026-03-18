@@ -12,11 +12,8 @@ import {
   Float32BufferAttribute,
   Group,
   LinearFilter,
-  Line,
   LineBasicMaterial,
-  LineDashedMaterial,
   LineLoop,
-  LineSegments,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -40,7 +37,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import type { ControlPanel } from "./controls";
 import {
-  formatDistanceAu,
   getDisplayPosition,
   getOrbitPathPoints,
   getPlanetSnapshots,
@@ -53,7 +49,7 @@ import {
 } from "./planets";
 import { createMulberry32 } from "./random";
 import { createPlanetTexture, createSaturnRingTexture, createSunGlowTexture } from "./textures";
-import type { OverlayAlignmentGuide, OverlayLayer } from "./ui/overlay";
+import type { OverlayLayer } from "./ui/overlay";
 
 interface PlanetariumSceneOptions {
   canvasRoot: HTMLElement;
@@ -94,21 +90,6 @@ interface CameraAnimationState {
   startTarget: Vector3;
   endTarget: Vector3;
   progress: number;
-}
-
-interface AlignmentLayout {
-  axisDirection: Vector3;
-  axisGuide: OverlayAlignmentGuide;
-  axisLengthAu: number;
-  axisConnectorCount: number;
-  distanceLabels: {
-    id: string;
-    label: string;
-    position: Vector3;
-  }[];
-  offsetByPlanetId: Record<string, number>;
-  orderedPlanetIds: string[];
-  tickPoints: Vector3[];
 }
 
 interface TestApiState {
@@ -203,6 +184,7 @@ const SATURN_RING_OUTER_RATIO = 2.35;
 const SATURN_RING_TILT_DEG = 26.7;
 const SATURN_RING_TILT_RADIANS = (SATURN_RING_TILT_DEG * Math.PI) / 180;
 const SUN_GLOW_RADIUS_RATIO = 3.2;
+const VISIBLE_PLANET_RADIUS_MULTIPLIER = 1.7;
 
 export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   focusPlanet(planetId: string): void;
@@ -346,7 +328,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       material,
       visiblePosition,
       currentPosition: visiblePosition.clone(),
-      currentRadius: snapshot.visibleRadiusAu,
+      currentRadius: getVisiblePlanetRadius(snapshot.visibleRadiusAu),
       ringMesh,
       ringMaterial,
     };
@@ -361,66 +343,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const orderedForAxis = [...planetInstances].sort(
     (left, right) => left.snapshot.heliocentricDistanceAu - right.snapshot.heliocentricDistanceAu,
   );
-  let alignmentLayout = createAlignmentLayout(orderedForAxis);
-  const alignmentGeometry = new BufferGeometry().setFromPoints([
-    new Vector3(0, 0, 0),
-    alignmentLayout.axisDirection.clone().multiplyScalar(alignmentLayout.axisLengthAu),
-  ]);
-  const alignmentUnderlayMaterial = new LineBasicMaterial({
-    color: 0xc8dcff,
-    transparent: true,
-    opacity: 0.38,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const alignmentUnderlay = new Line(alignmentGeometry, alignmentUnderlayMaterial);
-  alignmentUnderlay.renderOrder = 1;
-  scene.add(alignmentUnderlay);
-  const alignmentMaterial = new LineDashedMaterial({
-    color: 0xf2f7ff,
-    transparent: true,
-    opacity: 0.92,
-    dashSize: 0.44,
-    gapSize: 0.28,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const alignmentLine = new Line(alignmentGeometry, alignmentMaterial);
-  alignmentLine.computeLineDistances();
-  alignmentLine.renderOrder = 2;
-  scene.add(alignmentLine);
-
-  const alignmentDotsGeometry = new BufferGeometry().setFromPoints(createAlignmentDotPoints(
-    alignmentLayout.axisDirection,
-    alignmentLayout.axisLengthAu,
-    1.6,
-  ));
-  const alignmentDots = new Points(
-    alignmentDotsGeometry,
-    new PointsMaterial({
-      color: 0xf8fbff,
-      size: 0.32,
-      transparent: true,
-      opacity: 0.9,
-      depthTest: false,
-      depthWrite: false,
-      sizeAttenuation: true,
-    }),
-  );
-  alignmentDots.renderOrder = 2;
-  scene.add(alignmentDots);
-
-  const tickGeometry = new BufferGeometry().setFromPoints(alignmentLayout.tickPoints);
-  const tickMaterial = new LineBasicMaterial({
-    color: 0xe4eeff,
-    transparent: true,
-    opacity: 0.6,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const alignmentTicks = new LineSegments(tickGeometry, tickMaterial);
-  alignmentTicks.renderOrder = 2;
-  scene.add(alignmentTicks);
+  const orderedPlanetIds = orderedForAxis.map((instance) => instance.snapshot.definition.id);
 
   const raycaster = new Raycaster();
   const pointer = new Vector2(2, 2);
@@ -465,11 +388,11 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     selectedPlanetId: null,
     hoveredPlanetId: null,
     alignment: {
-      axisDirection: toTuple(alignmentLayout.axisDirection),
-      axisLengthAu: alignmentLayout.axisLengthAu,
-      connectorCount: alignmentLayout.axisConnectorCount,
-      orderedPlanetIds: alignmentLayout.orderedPlanetIds,
-      offsetByPlanetId: { ...alignmentLayout.offsetByPlanetId },
+      axisDirection: [0, 0, 0],
+      axisLengthAu: 0,
+      connectorCount: 0,
+      orderedPlanetIds,
+      offsetByPlanetId: {},
     },
     planetActualDistancesAu: Object.fromEntries(
       snapshots.map((snapshot) => [snapshot.definition.id, snapshot.heliocentricDistanceAu]),
@@ -538,9 +461,10 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       );
     }
 
+    const visibleRadius = getVisiblePlanetRadius(instance.snapshot.visibleRadiusAu);
     return Math.max(
-      clamp(instance.snapshot.visibleRadiusAu * 24, 1.6, 3.9),
-      instance.snapshot.visibleRadiusAu * saturnRingRadius * 1.9,
+      clamp(visibleRadius * 24, 1.6, 3.9),
+      visibleRadius * saturnRingRadius * 1.9,
     );
   };
 
@@ -656,20 +580,6 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     }
   };
 
-  const applyAlignmentLayout = (layout: AlignmentLayout) => {
-    alignmentGeometry.setFromPoints([
-      new Vector3(0, 0, 0),
-      layout.axisDirection.clone().multiplyScalar(layout.axisLengthAu),
-    ]);
-    alignmentLine.computeLineDistances();
-    alignmentDotsGeometry.setFromPoints(createAlignmentDotPoints(
-      layout.axisDirection,
-      layout.axisLengthAu,
-      1.6,
-    ));
-    tickGeometry.setFromPoints(layout.tickPoints);
-  };
-
   options.controls.setScaleMode(scaleMode);
 
   renderer.domElement.addEventListener("pointermove", (event: PointerEvent) => {
@@ -745,7 +655,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     for (const instance of planetInstances) {
       const targetRadius = scaleMode === "true"
         ? instance.snapshot.trueRadiusAu
-        : instance.snapshot.visibleRadiusAu;
+        : getVisiblePlanetRadius(instance.snapshot.visibleRadiusAu);
       const targetPosition = getPlanetTargetPosition(instance);
 
       instance.currentRadius = options.testMode
@@ -767,9 +677,6 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       displayPositions[instance.snapshot.definition.id] = toTuple(instance.currentPosition);
       displayDistances[instance.snapshot.definition.id] = instance.currentPosition.length();
     }
-
-    alignmentLayout = createAlignmentLayout(orderedForAxis);
-    applyAlignmentLayout(alignmentLayout);
 
     const targetSunRadius = scaleMode === "true" ? sunRadii.trueRadiusAu : sunRadii.visibleRadiusAu;
     sunRadius = options.testMode ? targetSunRadius : lerp(sunRadius, targetSunRadius, delta * 0.2 + 0.08);
@@ -847,19 +754,9 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       hoveredId: hoveredPlanetId,
       selectedId: selectedPlanetId,
     });
-    options.overlay.syncAlignmentGuide(alignmentLayout.axisGuide, camera, viewport);
-    options.overlay.syncDistanceLabels(alignmentLayout.distanceLabels, camera, viewport);
 
     backgroundBackdrop.group.position.copy(camera.position);
     renderer.render(scene, camera);
-
-    testState.alignment = {
-      axisDirection: toTuple(alignmentLayout.axisDirection),
-      axisLengthAu: alignmentLayout.axisLengthAu,
-      connectorCount: alignmentLayout.axisConnectorCount,
-      orderedPlanetIds: alignmentLayout.orderedPlanetIds,
-      offsetByPlanetId: { ...alignmentLayout.offsetByPlanetId },
-    };
     testState.planetDisplayPositions = displayPositions;
     testState.planetDisplayDistancesAu = displayDistances;
     testState.camera = {
@@ -1145,148 +1042,8 @@ function easeInOutCubic(value: number): number {
     : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
-function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentLayout {
-  const axisDirection = getDominantAlignmentDirection(orderedPlanets);
-  const furthestProjectionAu = orderedPlanets.reduce((maximum, instance) => {
-    return Math.max(maximum, instance.currentPosition.dot(axisDirection));
-  }, 0);
-  const axisLengthAu = furthestProjectionAu + Math.max(1.25, furthestProjectionAu * 0.04);
-  const labelNormal = getStableNormal(axisDirection);
-  const maxTickLengthAu = Math.max(0.32, axisLengthAu * 0.026);
-  const minTickLengthAu = 0.12;
-  const offsetByPlanetId: Record<string, number> = {};
-  const tickPoints: Vector3[] = [];
-  const axisGuideTicks: OverlayAlignmentGuide["ticks"] = [];
-
-  for (const instance of orderedPlanets) {
-    const projectedDistanceAu = Math.max(0, instance.currentPosition.dot(axisDirection));
-    const axisAnchor = axisDirection.clone().multiplyScalar(projectedDistanceAu);
-    const offsetVector = instance.currentPosition.clone().sub(axisAnchor);
-    const actualOffsetAu = offsetVector.length();
-    offsetByPlanetId[instance.snapshot.definition.id] = actualOffsetAu;
-
-    if (actualOffsetAu < 1e-4) {
-      continue;
-    }
-
-    const tickLengthAu = Math.min(
-      maxTickLengthAu,
-      Math.max(minTickLengthAu, actualOffsetAu),
-    );
-    const tickEnd = axisAnchor.clone().add(offsetVector.normalize().multiplyScalar(tickLengthAu));
-    tickPoints.push(axisAnchor, tickEnd);
-    axisGuideTicks.push({
-      id: instance.snapshot.definition.id,
-      start: axisAnchor.clone(),
-      end: tickEnd.clone(),
-    });
-  }
-
-  const distanceLabels = orderedPlanets.flatMap((instance, index) => {
-    const next = orderedPlanets[index + 1];
-
-    if (!next) {
-      return [];
-    }
-
-    const currentDistanceAu = Math.max(0, instance.currentPosition.dot(axisDirection));
-    const nextDistanceAu = Math.max(0, next.currentPosition.dot(axisDirection));
-    const gapAu = next.snapshot.heliocentricDistanceAu - instance.snapshot.heliocentricDistanceAu;
-    const midpointDistanceAu = currentDistanceAu + (nextDistanceAu - currentDistanceAu) * 0.5;
-    const offsetMagnitudeAu = 0.82 + Math.min(Math.abs(nextDistanceAu - currentDistanceAu) * 0.06, 0.46);
-    const side = index % 2 === 0 ? 1 : -1;
-    const position = axisDirection.clone()
-      .multiplyScalar(midpointDistanceAu)
-      .add(labelNormal.clone().multiplyScalar(offsetMagnitudeAu * side));
-
-    return {
-      id: `${instance.snapshot.definition.id}-${next.snapshot.definition.id}`,
-      label: formatDistanceAu(gapAu),
-      position,
-    };
-  });
-
-  return {
-    axisDirection,
-    axisGuide: {
-      axis: {
-        start: new Vector3(0, 0, 0),
-        end: axisDirection.clone().multiplyScalar(axisLengthAu),
-      },
-      ticks: axisGuideTicks,
-    },
-    axisLengthAu,
-    axisConnectorCount: tickPoints.length / 2,
-    distanceLabels,
-    offsetByPlanetId,
-    orderedPlanetIds: orderedPlanets.map((instance) => instance.snapshot.definition.id),
-    tickPoints,
-  };
-}
-
-function getDominantAlignmentDirection(orderedPlanets: PlanetMeshInstance[]): Vector3 {
-  const seedDirection = orderedPlanets.reduce((direction, instance) => {
-    const sample = instance.currentPosition.lengthSq() > 0
-      ? instance.currentPosition.clone().normalize()
-      : new Vector3(0, 0, 0);
-    return direction.add(sample);
-  }, new Vector3(0, 0, 0));
-
-  const dominantPositions = orderedPlanets
-    .map((instance) => instance.currentPosition)
-    .filter((position) => position.lengthSq() > 0 && position.clone().normalize().dot(seedDirection) >= 0);
-  const sourcePositions = dominantPositions.length > 0
-    ? dominantPositions
-    : orderedPlanets.map((instance) => instance.currentPosition);
-  const axisDirection = sourcePositions.reduce((direction, position) => {
-    if (position.lengthSq() === 0) {
-      return direction;
-    }
-
-    return direction.add(position.clone().normalize());
-  }, new Vector3(0, 0, 0));
-
-  if (axisDirection.lengthSq() < 1e-6) {
-    return orderedPlanets.at(-1)?.currentPosition.clone().normalize() ?? new Vector3(0, 0, -1);
-  }
-
-  axisDirection.normalize();
-
-  if ((orderedPlanets.at(-1)?.currentPosition.dot(axisDirection) ?? 0) < 0) {
-    axisDirection.negate();
-  }
-
-  return axisDirection;
-}
-
-function getStableNormal(axisDirection: Vector3): Vector3 {
-  const worldUp = new Vector3(0, 1, 0);
-  const fallbackRight = new Vector3(1, 0, 0);
-  const tangent = new Vector3().crossVectors(axisDirection, worldUp);
-
-  if (tangent.lengthSq() < 1e-6) {
-    tangent.crossVectors(axisDirection, fallbackRight);
-  }
-
-  return new Vector3().crossVectors(tangent.normalize(), axisDirection).normalize();
-}
-
-function createAlignmentDotPoints(
-  axisDirection: Vector3,
-  axisLengthAu: number,
-  stepAu: number,
-): Vector3[] {
-  const points: Vector3[] = [];
-
-  for (let distanceAu = 0; distanceAu <= axisLengthAu; distanceAu += stepAu) {
-    points.push(axisDirection.clone().multiplyScalar(distanceAu));
-  }
-
-  if (points.at(-1)?.distanceTo(axisDirection.clone().multiplyScalar(axisLengthAu)) !== 0) {
-    points.push(axisDirection.clone().multiplyScalar(axisLengthAu));
-  }
-
-  return points;
+function getVisiblePlanetRadius(radiusAu: number): number {
+  return radiusAu * VISIBLE_PLANET_RADIUS_MULTIPLIER;
 }
 
 function toTuple(vector: Vector3): [number, number, number] {
