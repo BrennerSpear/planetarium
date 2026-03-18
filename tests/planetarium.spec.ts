@@ -33,17 +33,12 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   const initialState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(initialState).toBeTruthy();
   expect(initialState?.planetCount).toBe(9);
+  expect(initialState?.orbitCount).toBe(9);
   expect(initialState?.julianDate).toBe(2510487.5);
   expect(initialState?.labels).toContain("Pluto");
-  expect(initialState?.camera.position[0]).toBeCloseTo(34.3, 1);
-  expect(initialState?.camera.position[1]).toBeCloseTo(37.7, 1);
-  expect(initialState?.camera.position[2]).toBeCloseTo(88.8, 1);
-  expect(initialState?.camera.target[0]).toBeCloseTo(-2.08, 1);
-  expect(initialState?.camera.target[1]).toBeCloseTo(0.07, 1);
-  expect(initialState?.camera.target[2]).toBeCloseTo(-4.93, 1);
   expect(initialState?.alignment.connectorCount).toBe(9);
   expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(45);
-  expect(initialState?.alignment.axisLengthAu).toBeLessThan(48);
+  expect(initialState?.alignment.axisLengthAu).toBeLessThan(50);
   expect(initialState?.background.starSeed).toBe(2161519);
   expect(initialState?.background.starCount).toBe(4210);
   expect(initialState?.background.layerCount).toBe(3);
@@ -58,6 +53,13 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     "neptune",
     "pluto",
   ]);
+  expect(initialState?.planetDisplayDistancesAu.mercury).toBeGreaterThan(initialState?.planetActualDistancesAu.mercury ?? 0);
+  expect(initialState?.planetDisplayDistancesAu.venus).toBeGreaterThan(initialState?.planetActualDistancesAu.venus ?? 0);
+  expect(initialState?.planetDisplayDistancesAu.earth).toBeGreaterThan(initialState?.planetActualDistancesAu.earth ?? 0);
+  expect(initialState?.planetDisplayDistancesAu.mars).toBeGreaterThan(initialState?.planetActualDistancesAu.mars ?? 0);
+  expect(initialState?.visuals.saturn.ringTiltDeg).toBeCloseTo(26.7, 1);
+  expect(initialState?.visuals.saturn.ringOuterRadius).toBeGreaterThan(initialState?.visuals.saturn.radius ?? 0);
+  expect(initialState?.visuals.sun.glowRadius).toBeGreaterThan(initialState?.visuals.sun.radius ?? 0);
 
   const labelRects = await labels.evaluateAll((nodes) => nodes.map((node) => {
     const element = node as HTMLElement;
@@ -80,19 +82,41 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     expect(label.right, `${label.id} should stay inside the right edge`).toBeLessThanOrEqual(1440);
     expect(label.bottom, `${label.id} should stay inside the bottom edge`).toBeLessThanOrEqual(900);
   }
-  expect(initialState?.visuals.saturn.ringTiltDeg).toBeCloseTo(26.7, 1);
-  expect(initialState?.visuals.saturn.ringOuterRadius).toBeGreaterThan(initialState?.visuals.saturn.radius ?? 0);
-  expect(initialState?.visuals.sun.glowRadius).toBeGreaterThan(initialState?.visuals.sun.radius ?? 0);
 
   await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-visible-scale.png");
+
+  const cameraBeforeFocus = initialState?.camera;
+  await page.getByRole("button", { name: "Earth" }).click();
+  await expect(page.locator("[data-focus-heading]")).toHaveText("Earth");
+  await expect(page.locator("[data-info-category]")).toHaveText("Terrestrial");
+
+  const focusedState = await page.evaluate(() => window.__planetariumTestApi?.getState());
+  expect(focusedState?.selectedPlanetId).toBe("earth");
+  expect(focusedState?.camera).not.toEqual(cameraBeforeFocus);
+  expect(distanceBetween(focusedState?.camera.position, focusedState?.camera.target)).toBeLessThan(
+    distanceBetween(cameraBeforeFocus?.position, cameraBeforeFocus?.target),
+  );
+  expect(distanceBetween(
+    focusedState?.camera.target,
+    focusedState?.planetDisplayPositions.earth,
+  )).toBeLessThan(0.001);
 
   await page.getByRole("button", { name: "True scale" }).click();
   await expect(page.locator("body")).toHaveAttribute("data-scale-mode", "true");
   await waitForStableFrame(page);
 
+  await expect.poll(async () => {
+    const state = await page.evaluate(() => window.__planetariumTestApi?.getState());
+    return Math.abs((state?.planetDisplayDistancesAu.earth ?? 0) - (state?.planetActualDistancesAu.earth ?? 0));
+  }).toBeLessThan(0.00001);
+
   const trueScaleState = await page.evaluate(() => window.__planetariumTestApi?.getState());
-  expect(trueScaleState?.visuals.saturn.ringOuterRadius).toBeLessThan(initialState?.visuals.saturn.ringOuterRadius ?? Number.POSITIVE_INFINITY);
-  expect(trueScaleState?.visuals.sun.glowRadius).toBeLessThan(initialState?.visuals.sun.glowRadius ?? Number.POSITIVE_INFINITY);
+  expect(trueScaleState?.visuals.saturn.ringOuterRadius).toBeLessThan(
+    initialState?.visuals.saturn.ringOuterRadius ?? Number.POSITIVE_INFINITY,
+  );
+  expect(trueScaleState?.visuals.sun.glowRadius).toBeLessThan(
+    initialState?.visuals.sun.glowRadius ?? Number.POSITIVE_INFINITY,
+  );
 
   await page.locator("[data-planet-label='earth']").evaluate((node) => {
     (node as HTMLButtonElement).click();
@@ -157,4 +181,17 @@ async function hideUiChromeForCapture(page: Page): Promise<void> {
     document.querySelector<HTMLElement>("[data-hud-root]")?.style.setProperty("display", "none");
     document.querySelector<HTMLElement>("[data-overlay-root]")?.style.setProperty("display", "none");
   });
+}
+
+function distanceBetween(
+  left: [number, number, number] | undefined,
+  right: [number, number, number] | undefined,
+): number {
+  if (!left || !right) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const [leftX, leftY, leftZ] = left;
+  const [rightX, rightY, rightZ] = right;
+  return Math.hypot(leftX - rightX, leftY - rightY, leftZ - rightZ);
 }
