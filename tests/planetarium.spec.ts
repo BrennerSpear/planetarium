@@ -6,10 +6,28 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   const labels = page.locator("[data-planet-label]");
   const distanceLabels = page.locator("[data-distance-label]");
+  const focusAccent = page.locator("[data-focus-accent]");
 
   await expect(labels).toHaveCount(9);
   await expect(distanceLabels).toHaveCount(8);
   await expect(page.locator("[data-scale-toggle='visible']")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".helper-copy")).toHaveText(
+    "Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.",
+  );
+  await expect(page.locator("[data-focus-heading]")).toHaveText("The 2161 alignment");
+  await expect(page.locator("[data-focus-subheading]")).toHaveText(
+    "Approximate heliocentric positions for May 19, 2161, when all nine worlds gather on one side of the Sun.",
+  );
+  await expect(page.locator("[data-info-category-label]")).toHaveText("Date");
+  await expect(page.locator("[data-info-category]")).toHaveText("May 19, 2161");
+  await expect(page.locator("[data-info-distance-label]")).toHaveText("Alignment");
+  await expect(page.locator("[data-info-distance]")).toHaveText(
+    "All nine worlds share the same side of the Sun, arranged outward by heliocentric distance.",
+  );
+  await expect(page.locator(".footer-panel .lede")).toHaveText(
+    "The glowing alignment path follows the planets in heliocentric order, and the floating markers show the spacing between neighboring worlds.",
+  );
+  await expect(focusAccent).toBeHidden();
 
   const initialState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(initialState).toBeTruthy();
@@ -67,6 +85,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await page.getByRole("button", { name: "Earth" }).click();
   await expect(page.locator("[data-focus-heading]")).toHaveText("Earth");
   await expect(page.locator("[data-info-category]")).toHaveText("Terrestrial");
+  await expect(page.locator(".info-panel")).toHaveAttribute("data-focus-source", "selected");
+  await expect(focusAccent).toBeVisible();
+  await expect(focusAccent).toHaveCSS("background-color", "rgb(158, 212, 255)");
 
   const focusedState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(focusedState?.selectedPlanetId).toBe("earth");
