@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const testServerPort = 43173;
+const testServerUrl = `http://127.0.0.1:${testServerPort}`;
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -9,7 +12,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     ...devices["Desktop Chrome"],
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: testServerUrl,
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 1,
     colorScheme: "dark",
@@ -24,9 +27,9 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "bun run dev --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
+    command: `bun run dev --host 127.0.0.1 --port ${testServerPort} --strictPort`,
+    url: testServerUrl,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });
