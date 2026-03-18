@@ -70,9 +70,20 @@ export interface PlanetSnapshot {
   meanAnomalyDeg: number;
 }
 
+interface ResolvedOrbitalParameters {
+  semiMajorAxisAu: number;
+  eccentricity: number;
+  inclinationDeg: number;
+  longitudeOfAscendingNodeDeg: number;
+  argumentOfPerihelionDeg: number;
+  meanAnomalyDeg: number;
+}
+
 const AU_IN_KM = 149_597_870.7;
 const J2000_JULIAN_DATE = 2_451_545.0;
 const MERCURY_RADIUS_KM = 2_439.7;
+const VISIBLE_INNER_ORBIT_LIMIT_AU = 2.25;
+const VISIBLE_INNER_ORBIT_EXPANDED_LIMIT_AU = 4.5;
 
 export const TARGET_DATE_LABEL = "May 19, 2161";
 
@@ -404,6 +415,44 @@ export function getSunRadii(): { trueRadiusAu: number; visibleRadiusAu: number }
   };
 }
 
+export function getOrbitPathPoints(
+  definition: PlanetDefinition,
+  julianDate: number,
+  segmentCount = 192,
+): Vector3[] {
+  const parameters = resolveOrbitalParameters(definition.orbit, julianDate);
+
+  if (parameters.semiMajorAxisAu === 0 || segmentCount < 3) {
+    return [new Vector3(0, 0, 0)];
+  }
+
+  const semiMinorAxisAu = parameters.semiMajorAxisAu * Math.sqrt(1 - parameters.eccentricity ** 2);
+  const points: Vector3[] = [];
+
+  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+    const eccentricAnomaly = (segmentIndex / segmentCount) * Math.PI * 2;
+    const xPrime = parameters.semiMajorAxisAu * (Math.cos(eccentricAnomaly) - parameters.eccentricity);
+    const yPrime = semiMinorAxisAu * Math.sin(eccentricAnomaly);
+    points.push(orbitalPlanePointToEcliptic(xPrime, yPrime, parameters));
+  }
+
+  return points;
+}
+
+export function getDisplayPosition(position: Vector3, scaleMode: ScaleMode): Vector3 {
+  if (scaleMode === "true") {
+    return position.clone();
+  }
+
+  const distanceAu = position.length();
+
+  if (distanceAu <= 0) {
+    return position.clone();
+  }
+
+  return position.clone().multiplyScalar(mapVisibleDistance(distanceAu) / distanceAu);
+}
+
 export function formatDistanceAu(distanceAu: number): string {
   return distanceAu >= 10
     ? `${distanceAu.toFixed(1)} AU`
@@ -443,36 +492,7 @@ function computeVisibleRadiusAu(id: string, radiusKm: number): number {
 }
 
 function computePosition(orbit: OrbitalModel, julianDate: number): Vector3 {
-  if (orbit.type === "osculating") {
-    const meanAnomalyDeg = computeMeanAnomaly(orbit, julianDate);
-    return orbitalPlaneToEcliptic({
-      semiMajorAxisAu: orbit.semiMajorAxisAu,
-      eccentricity: orbit.eccentricity,
-      inclinationDeg: orbit.inclinationDeg,
-      longitudeOfAscendingNodeDeg: orbit.longitudeOfAscendingNodeDeg,
-      argumentOfPerihelionDeg: orbit.argumentOfPerihelionDeg,
-      meanAnomalyDeg,
-    });
-  }
-
-  const centuries = (julianDate - J2000_JULIAN_DATE) / 36_525;
-  const semiMajorAxisAu = orbit.a0 + orbit.aDot * centuries;
-  const eccentricity = orbit.e0 + orbit.eDot * centuries;
-  const inclinationDeg = orbit.i0 + orbit.iDot * centuries;
-  const meanLongitudeDeg = orbit.l0 + orbit.lDot * centuries;
-  const longitudeOfPerihelionDeg = orbit.longPeri0 + orbit.longPeriDot * centuries;
-  const longitudeOfAscendingNodeDeg = orbit.longNode0 + orbit.longNodeDot * centuries;
-  const argumentOfPerihelionDeg = longitudeOfPerihelionDeg - longitudeOfAscendingNodeDeg;
-  const meanAnomalyDeg = computeMeanAnomaly(orbit, julianDate);
-
-  return orbitalPlaneToEcliptic({
-    semiMajorAxisAu,
-    eccentricity,
-    inclinationDeg,
-    longitudeOfAscendingNodeDeg,
-    argumentOfPerihelionDeg,
-    meanAnomalyDeg: normalizeDegreesSigned(meanAnomalyDeg),
-  });
+  return orbitalPlaneToEcliptic(resolveOrbitalParameters(orbit, julianDate));
 }
 
 function computeMeanAnomaly(orbit: OrbitalModel, julianDate: number): number {
@@ -509,6 +529,19 @@ function orbitalPlaneToEcliptic(args: {
     * Math.sqrt(1 - args.eccentricity ** 2)
     * Math.sin(eccentricAnomaly);
 
+  return orbitalPlanePointToEcliptic(xPrime, yPrime, args);
+}
+
+function orbitalPlanePointToEcliptic(
+  xPrime: number,
+  yPrime: number,
+  args: {
+    inclinationDeg: number;
+    longitudeOfAscendingNodeDeg: number;
+    argumentOfPerihelionDeg: number;
+  },
+): Vector3 {
+
   const omega = degreesToRadians(args.argumentOfPerihelionDeg);
   const longNode = degreesToRadians(args.longitudeOfAscendingNodeDeg);
   const inclination = degreesToRadians(args.inclinationDeg);
@@ -528,6 +561,41 @@ function orbitalPlaneToEcliptic(args: {
     + (cosOmega * sinInclination) * yPrime;
 
   return new Vector3(xEcliptic, zEcliptic, yEcliptic);
+}
+
+function resolveOrbitalParameters(orbit: OrbitalModel, julianDate: number): ResolvedOrbitalParameters {
+  if (orbit.type === "osculating") {
+    return {
+      semiMajorAxisAu: orbit.semiMajorAxisAu,
+      eccentricity: orbit.eccentricity,
+      inclinationDeg: orbit.inclinationDeg,
+      longitudeOfAscendingNodeDeg: orbit.longitudeOfAscendingNodeDeg,
+      argumentOfPerihelionDeg: orbit.argumentOfPerihelionDeg,
+      meanAnomalyDeg: computeMeanAnomaly(orbit, julianDate),
+    };
+  }
+
+  const centuries = (julianDate - J2000_JULIAN_DATE) / 36_525;
+  const longitudeOfAscendingNodeDeg = orbit.longNode0 + orbit.longNodeDot * centuries;
+  const longitudeOfPerihelionDeg = orbit.longPeri0 + orbit.longPeriDot * centuries;
+
+  return {
+    semiMajorAxisAu: orbit.a0 + orbit.aDot * centuries,
+    eccentricity: orbit.e0 + orbit.eDot * centuries,
+    inclinationDeg: orbit.i0 + orbit.iDot * centuries,
+    longitudeOfAscendingNodeDeg,
+    argumentOfPerihelionDeg: longitudeOfPerihelionDeg - longitudeOfAscendingNodeDeg,
+    meanAnomalyDeg: normalizeDegreesSigned(computeMeanAnomaly(orbit, julianDate)),
+  };
+}
+
+function mapVisibleDistance(distanceAu: number): number {
+  if (distanceAu <= VISIBLE_INNER_ORBIT_LIMIT_AU) {
+    return VISIBLE_INNER_ORBIT_EXPANDED_LIMIT_AU
+      * Math.sqrt(distanceAu / VISIBLE_INNER_ORBIT_LIMIT_AU);
+  }
+
+  return VISIBLE_INNER_ORBIT_EXPANDED_LIMIT_AU + (distanceAu - VISIBLE_INNER_ORBIT_LIMIT_AU);
 }
 
 function solveEccentricAnomaly(meanAnomalyDeg: number, eccentricity: number): number {
