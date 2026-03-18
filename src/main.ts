@@ -53,5 +53,5 @@ controls.bindScaleModeChange((mode) => {
 });
 
 overlay.bindPlanetSelection((planetId) => {
-  scene.selectPlanet(planetId);
+  scene.focusPlanet(planetId);
 });

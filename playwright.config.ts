@@ -1,6 +1,11 @@
+import { basename } from "node:path";
+
 import { defineConfig, devices } from "@playwright/test";
 
-const testServerPort = 43173;
+const worktreeName = basename(process.cwd());
+const worktreeMatch = worktreeName.match(/^TYC-(\d+)$/i);
+const defaultTestServerPort = worktreeMatch ? 43_173 + Number(worktreeMatch[1]) : 43_173;
+const testServerPort = Number(process.env.PLAYWRIGHT_TEST_SERVER_PORT ?? defaultTestServerPort);
 const testServerUrl = `http://127.0.0.1:${testServerPort}`;
 
 export default defineConfig({

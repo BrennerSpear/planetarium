@@ -154,16 +154,23 @@ export function createOverlayLayer(options: OverlayLayerOptions): OverlayLayer {
     },
     syncPlanetLabels(labels, camera, viewport, state) {
       const seen = new Set<string>();
+      const rankById = new Map(
+        [...labels]
+          .sort((left, right) => left.position.length() - right.position.length())
+          .map((label, index) => [label.id, index]),
+      );
 
       for (const label of labels) {
         seen.add(label.id);
         const button = ensurePlanetButton(label);
         const isSelected = state.selectedId === label.id;
         const isHovered = state.hoveredId === label.id;
+        const rank = rankById.get(label.id) ?? 0;
 
         button.dataset.selected = String(isSelected);
         button.dataset.hovered = String(isHovered);
-        projectNode(button, label.position, camera, viewport, { yOffset: -10 });
+        button.style.zIndex = String(isSelected || isHovered ? 2_000 : Math.max(1, 1_000 - rank));
+        projectNode(button, label.position, camera, viewport, { yOffset: -12 - rank * 18 });
       }
 
       for (const [id, button] of planetButtons) {
