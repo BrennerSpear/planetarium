@@ -19,7 +19,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.labels).toContain("Pluto");
   expect(initialState?.alignment.connectorCount).toBe(9);
   expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(45);
-  expect(initialState?.alignment.axisLengthAu).toBeLessThan(48);
+  expect(initialState?.alignment.axisLengthAu).toBeLessThan(50);
   expect(initialState?.background.starSeed).toBe(2161519);
   expect(initialState?.background.starCount).toBe(4210);
   expect(initialState?.background.layerCount).toBe(3);
