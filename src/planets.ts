@@ -360,30 +360,6 @@ export const PLANET_DEFINITIONS: readonly PlanetDefinition[] = [
       spotColor: "#244a93",
     },
   },
-  {
-    id: "pluto",
-    label: "Pluto",
-    category: "Dwarf planet",
-    radiusKm: 1_188.3,
-    orbit: {
-      type: "osculating",
-      epochJulianDate: 2_457_588.5,
-      semiMajorAxisAu: 39.58862938517124,
-      eccentricity: 0.2518378778576892,
-      inclinationDeg: 17.14771140999114,
-      longitudeOfAscendingNodeDeg: 110.2923840543057,
-      argumentOfPerihelionDeg: 113.7090015158565,
-      meanAnomalyDeg: 38.68366347318184,
-      meanMotionDegPerDay: 0.003956838955553025,
-    },
-    visual: {
-      kind: "ice",
-      palette: ["#4d342d", "#887666", "#d2b89e", "#ece7dc"],
-      accentColor: "#dbc3aa",
-      polarColor: "#f2ebe2",
-    },
-    note: "Pluto uses JPL Small-Body Database osculating elements because the official JPL approximation page removes Pluto.",
-  },
 ] as const;
 
 export function getPlanetSnapshots(julianDate: number): PlanetSnapshot[] {

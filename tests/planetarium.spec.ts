@@ -9,21 +9,21 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   const distanceLabels = page.locator("[data-distance-label]");
   const focusAccent = page.locator("[data-focus-accent]");
 
-  await expect(labels).toHaveCount(9);
-  await expect(distanceLabels).toHaveCount(8);
+  await expect(labels).toHaveCount(8);
+  await expect(distanceLabels).toHaveCount(7);
   await expect(page.locator("[data-scale-toggle='visible']")).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".helper-copy")).toHaveText(
     "Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.",
   );
   await expect(page.locator("[data-focus-heading]")).toHaveText("The 2161 alignment");
   await expect(page.locator("[data-focus-subheading]")).toHaveText(
-    "Approximate heliocentric positions for May 19, 2161, when all nine worlds gather on one side of the Sun.",
+    "Approximate heliocentric positions for May 19, 2161, when all eight planets gather on one side of the Sun.",
   );
   await expect(page.locator("[data-info-category-label]")).toHaveText("Date");
   await expect(page.locator("[data-info-category]")).toHaveText("May 19, 2161");
   await expect(page.locator("[data-info-distance-label]")).toHaveText("Alignment");
   await expect(page.locator("[data-info-distance]")).toHaveText(
-    "All nine worlds share the same side of the Sun, arranged outward by heliocentric distance.",
+    "All eight planets share the same side of the Sun, arranged outward by heliocentric distance.",
   );
   await expect(page.locator(".footer-panel .lede")).toHaveText(
     "The glowing alignment path follows the planets in heliocentric order, and the floating markers show the spacing between neighboring worlds.",
@@ -32,13 +32,13 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
 
   const initialState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(initialState).toBeTruthy();
-  expect(initialState?.planetCount).toBe(9);
-  expect(initialState?.orbitCount).toBe(9);
+  expect(initialState?.planetCount).toBe(8);
+  expect(initialState?.orbitCount).toBe(8);
   expect(initialState?.julianDate).toBe(2510487.5);
-  expect(initialState?.labels).toContain("Pluto");
-  expect(initialState?.alignment.connectorCount).toBe(9);
-  expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(45);
-  expect(initialState?.alignment.axisLengthAu).toBeLessThan(50);
+  expect(initialState?.labels).not.toContain("Pluto");
+  expect(initialState?.alignment.connectorCount).toBe(8);
+  expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(28);
+  expect(initialState?.alignment.axisLengthAu).toBeLessThan(31);
   expect(initialState?.background.starSeed).toBe(2161519);
   expect(initialState?.background.starCount).toBe(4210);
   expect(initialState?.background.layerCount).toBe(3);
@@ -51,8 +51,8 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     "saturn",
     "uranus",
     "neptune",
-    "pluto",
   ]);
+  expect(initialState?.alignment.orderedPlanetIds.at(-1)).toBe("neptune");
   expect(initialState?.planetDisplayDistancesAu.mercury).toBeGreaterThan(initialState?.planetActualDistancesAu.mercury ?? 0);
   expect(initialState?.planetDisplayDistancesAu.venus).toBeGreaterThan(initialState?.planetActualDistancesAu.venus ?? 0);
   expect(initialState?.planetDisplayDistancesAu.earth).toBeGreaterThan(initialState?.planetActualDistancesAu.earth ?? 0);
@@ -82,6 +82,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     expect(label.right, `${label.id} should stay inside the right edge`).toBeLessThanOrEqual(1440);
     expect(label.bottom, `${label.id} should stay inside the bottom edge`).toBeLessThanOrEqual(900);
   }
+
+  const cameraDistance = distanceBetween(initialState?.camera.position, initialState?.camera.target);
+  expect(cameraDistance).toBeLessThan(60);
 
   await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-visible-scale.png");
 
