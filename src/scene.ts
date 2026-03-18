@@ -983,7 +983,9 @@ function easeInOutCubic(value: number): number {
 
 function createAlignmentLayout(orderedPlanets: PlanetMeshInstance[]): AlignmentLayout {
   const axisDirection = getDominantAlignmentDirection(orderedPlanets);
-  const furthestProjectionAu = orderedPlanets.at(-1)?.currentPosition.dot(axisDirection) ?? 0;
+  const furthestProjectionAu = orderedPlanets.reduce((maximum, instance) => {
+    return Math.max(maximum, instance.currentPosition.dot(axisDirection));
+  }, 0);
   const axisLengthAu = furthestProjectionAu + Math.max(1.25, furthestProjectionAu * 0.04);
   const labelNormal = getStableNormal(axisDirection);
   const maxTickLengthAu = Math.max(0.32, axisLengthAu * 0.026);
@@ -1084,7 +1086,13 @@ function getDominantAlignmentDirection(orderedPlanets: PlanetMeshInstance[]): Ve
     return orderedPlanets.at(-1)?.currentPosition.clone().normalize() ?? new Vector3(0, 0, -1);
   }
 
-  return axisDirection.normalize();
+  axisDirection.normalize();
+
+  if ((orderedPlanets.at(-1)?.currentPosition.dot(axisDirection) ?? 0) < 0) {
+    axisDirection.negate();
+  }
+
+  return axisDirection;
 }
 
 function getStableNormal(axisDirection: Vector3): Vector3 {
