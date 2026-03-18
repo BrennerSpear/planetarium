@@ -196,9 +196,32 @@ h2 {
 }
 
 .planet-label-layer,
+.alignment-guide-layer,
 .distance-label-layer {
   position: absolute;
   inset: 0;
+}
+
+.alignment-guide-layer {
+  overflow: visible;
+}
+
+.alignment-axis,
+.alignment-ticks line {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.alignment-axis {
+  stroke: rgba(246, 250, 255, 0.96);
+  stroke-width: 2.2;
+  stroke-dasharray: 4 7.5;
+  filter: drop-shadow(0 0 8px rgba(184, 211, 255, 0.32));
+}
+
+.alignment-ticks line {
+  stroke: rgba(229, 239, 255, 0.7);
+  stroke-width: 1.55;
 }
 
 .planet-label,

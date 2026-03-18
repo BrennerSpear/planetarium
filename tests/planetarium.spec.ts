@@ -22,6 +22,20 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   expect(initialState?.camera.target[0]).toBeCloseTo(-2.08, 1);
   expect(initialState?.camera.target[1]).toBeCloseTo(0.07, 1);
   expect(initialState?.camera.target[2]).toBeCloseTo(-4.93, 1);
+  expect(initialState?.alignment.connectorCount).toBe(9);
+  expect(initialState?.alignment.axisLengthAu).toBeGreaterThan(45);
+  expect(initialState?.alignment.axisLengthAu).toBeLessThan(48);
+  expect(initialState?.alignment.orderedPlanetIds).toEqual([
+    "mercury",
+    "venus",
+    "earth",
+    "mars",
+    "jupiter",
+    "saturn",
+    "uranus",
+    "neptune",
+    "pluto",
+  ]);
 
   const labelRects = await labels.evaluateAll((nodes) => nodes.map((node) => {
     const element = node as HTMLElement;
