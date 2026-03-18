@@ -1,11 +1,7 @@
-import type { PlanetSnapshot, ScaleMode } from "./planets";
+import type { PlanetSnapshot } from "./planets";
 import { formatDistanceAu, formatDistanceMillionKm } from "./planets";
 
-type ScaleModeChangeHandler = (mode: ScaleMode) => void;
-
 export interface ControlPanel {
-  bindScaleModeChange(handler: ScaleModeChangeHandler): void;
-  setScaleMode(mode: ScaleMode): void;
   updateFocus(snapshot: PlanetSnapshot | null, source: "hover" | "selected" | "none"): void;
 }
 
@@ -13,7 +9,6 @@ interface ControlPanelOptions {
   root: HTMLElement;
   dateLabel: string;
   julianDate: number;
-  initialScaleMode: ScaleMode;
 }
 
 interface InfoSlotCopy {
@@ -42,7 +37,7 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
     },
     radius: {
       label: "Scale",
-      value: "Visible scale keeps each planet legible; True scale restores their physical proportions.",
+      value: "Planet sizes are tuned for legibility so the full alignment remains readable at solar-system distances.",
     },
     period: {
       label: "Interaction",
@@ -61,7 +56,6 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
 
 export function createControlPanel(options: ControlPanelOptions): ControlPanel {
   const root = options.root;
-  const scaleHandlers: ScaleModeChangeHandler[] = [];
   const defaultInfoCopy = getDefaultInfoCopy(options.dateLabel);
 
   root.innerHTML = `
@@ -71,20 +65,6 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
       <p class="lede">
         Approximate heliocentric positions for <strong>${options.dateLabel}</strong>.
         Exact Julian date: <strong>${options.julianDate.toFixed(1)}</strong>.
-      </p>
-    </section>
-
-    <section class="panel controls-panel">
-      <div class="panel-heading">
-        <h2>Scale</h2>
-        <p>Switch between physically tiny planets and an explorable visible mode.</p>
-      </div>
-      <div class="toggle-row" data-scale-toggle-row>
-        <button type="button" class="toggle-button" data-scale-toggle="visible">Visible scale</button>
-        <button type="button" class="toggle-button" data-scale-toggle="true">True scale</button>
-      </div>
-      <p class="helper-copy">
-        Visible scale preserves the order of the alignment while enlarging planets that would otherwise vanish at system scale.
       </p>
     </section>
 
@@ -138,13 +118,6 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     </section>
   `;
 
-  const visibleButton = root.querySelector<HTMLButtonElement>("[data-scale-toggle='visible']");
-  const trueButton = root.querySelector<HTMLButtonElement>("[data-scale-toggle='true']");
-
-  if (!visibleButton || !trueButton) {
-    throw new Error("Scale controls did not initialize");
-  }
-
   const infoPanel = root.querySelector<HTMLElement>(".info-panel");
   const focusHeading = root.querySelector<HTMLElement>("[data-focus-heading]");
   const focusSubheading = root.querySelector<HTMLElement>("[data-focus-subheading]");
@@ -183,31 +156,6 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     throw new Error("Info panel did not initialize");
   }
 
-  const buttons = new Map<ScaleMode, HTMLButtonElement>([
-    ["visible", visibleButton],
-    ["true", trueButton],
-  ]);
-
-  const applyScaleMode = (mode: ScaleMode) => {
-    document.body.dataset.scaleMode = mode;
-
-    for (const [buttonMode, button] of buttons) {
-      const isActive = mode === buttonMode;
-      button.dataset.active = String(isActive);
-      button.setAttribute("aria-pressed", String(isActive));
-    }
-  };
-
-  for (const [mode, button] of buttons) {
-    button.addEventListener("click", () => {
-      applyScaleMode(mode);
-
-      for (const handler of scaleHandlers) {
-        handler(mode);
-      }
-    });
-  }
-
   const resetFocusAccent = () => {
     focusAccent.hidden = true;
     focusAccent.style.backgroundColor = "";
@@ -243,16 +191,9 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
     noteLabel.textContent = PLANET_INFO_LABELS.note;
   };
 
-  applyScaleMode(options.initialScaleMode);
   applyDefaultFocus();
 
   return {
-    bindScaleModeChange(handler) {
-      scaleHandlers.push(handler);
-    },
-    setScaleMode(mode) {
-      applyScaleMode(mode);
-    },
     updateFocus(snapshot, source) {
       if (!snapshot) {
         applyDefaultFocus();

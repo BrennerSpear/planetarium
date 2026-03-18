@@ -1,7 +1,5 @@
 import { Vector3 } from "three";
 
-export type ScaleMode = "visible" | "true";
-
 type PlanetKind = "rocky" | "gas" | "ice" | "earth" | "sun";
 
 interface VisualProfile {
@@ -64,7 +62,6 @@ export interface PlanetSnapshot {
   definition: PlanetDefinition;
   position: Vector3;
   heliocentricDistanceAu: number;
-  trueRadiusAu: number;
   visibleRadiusAu: number;
   orbitalPeriodYears: number;
   meanAnomalyDeg: number;
@@ -366,7 +363,6 @@ export function getPlanetSnapshots(julianDate: number): PlanetSnapshot[] {
   return PLANET_DEFINITIONS.map((definition) => {
     const position = computePosition(definition.orbit, julianDate);
     const heliocentricDistanceAu = position.length();
-    const trueRadiusAu = definition.radiusKm / AU_IN_KM;
     const visibleRadiusAu = computeVisibleRadiusAu(definition.id, definition.radiusKm);
     const orbitalPeriodYears = definition.orbit.type === "osculating"
       ? ((360 / definition.orbit.meanMotionDegPerDay) / 365.25)
@@ -376,7 +372,6 @@ export function getPlanetSnapshots(julianDate: number): PlanetSnapshot[] {
       definition,
       position,
       heliocentricDistanceAu,
-      trueRadiusAu,
       visibleRadiusAu,
       orbitalPeriodYears,
       meanAnomalyDeg: computeMeanAnomaly(definition.orbit, julianDate),
@@ -384,11 +379,8 @@ export function getPlanetSnapshots(julianDate: number): PlanetSnapshot[] {
   });
 }
 
-export function getSunRadii(): { trueRadiusAu: number; visibleRadiusAu: number } {
-  return {
-    trueRadiusAu: SUN_DEFINITION.radiusKm / AU_IN_KM,
-    visibleRadiusAu: 0.52,
-  };
+export function getVisibleSunRadiusAu(): number {
+  return 0.52;
 }
 
 export function getOrbitPathPoints(
@@ -415,11 +407,7 @@ export function getOrbitPathPoints(
   return points;
 }
 
-export function getDisplayPosition(position: Vector3, scaleMode: ScaleMode): Vector3 {
-  if (scaleMode === "true") {
-    return position.clone();
-  }
-
+export function getDisplayPosition(position: Vector3): Vector3 {
   const distanceAu = position.length();
 
   if (distanceAu <= 0) {

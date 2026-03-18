@@ -40,9 +40,8 @@ import {
   getDisplayPosition,
   getOrbitPathPoints,
   getPlanetSnapshots,
-  getSunRadii,
+  getVisibleSunRadiusAu,
   type PlanetSnapshot,
-  type ScaleMode,
   SUN_DEFINITION,
   TARGET_DATE_LABEL,
   TARGET_JULIAN_DATE,
@@ -70,13 +69,6 @@ interface PlanetMeshInstance {
   ringMaterial: MeshStandardMaterial | null;
 }
 
-interface OrbitLineInstance {
-  geometry: BufferGeometry;
-  truePoints: Vector3[];
-  visiblePoints: Vector3[];
-  currentPoints: Vector3[];
-}
-
 interface CameraFraming {
   position: Vector3;
   target: Vector3;
@@ -96,7 +88,7 @@ interface TestApiState {
   ready: boolean;
   dateLabel: string;
   julianDate: number;
-  scaleMode: ScaleMode;
+  scaleMode: "visible";
   planetCount: number;
   orbitCount: number;
   labels: string[];
@@ -188,7 +180,6 @@ const VISIBLE_PLANET_RADIUS_MULTIPLIER = 1.7;
 
 export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   focusPlanet(planetId: string): void;
-  setScaleMode(mode: ScaleMode): void;
 } {
   const scene = new Scene();
 
@@ -247,17 +238,15 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const saturnRingGeometry = new RingGeometry(SATURN_RING_INNER_RATIO, SATURN_RING_OUTER_RATIO, 128, 12);
   const planetInstances: PlanetMeshInstance[] = [];
   const planetMeshes: Mesh[] = [];
-  const orbitInstances: OrbitLineInstance[] = [];
   const snapshotById = new Map<string, PlanetSnapshot>();
   const planetById = new Map<string, PlanetMeshInstance>();
 
   for (const snapshot of snapshots) {
     snapshotById.set(snapshot.definition.id, snapshot);
 
-    const trueOrbitPoints = getOrbitPathPoints(snapshot.definition, TARGET_JULIAN_DATE);
-    const visibleOrbitPoints = trueOrbitPoints.map((point) => getDisplayPosition(point, "visible"));
-    const currentOrbitPoints = visibleOrbitPoints.map((point) => point.clone());
-    const orbitGeometry = new BufferGeometry().setFromPoints(currentOrbitPoints);
+    const visibleOrbitPoints = getOrbitPathPoints(snapshot.definition, TARGET_JULIAN_DATE)
+      .map((point) => getDisplayPosition(point));
+    const orbitGeometry = new BufferGeometry().setFromPoints(visibleOrbitPoints);
     const orbitMaterial = new LineBasicMaterial({
       color: new Color(snapshot.definition.visual.accentColor),
       transparent: true,
@@ -266,12 +255,6 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     });
     const orbitLine = new LineLoop(orbitGeometry, orbitMaterial);
     scene.add(orbitLine);
-    orbitInstances.push({
-      geometry: orbitGeometry,
-      truePoints: trueOrbitPoints,
-      visiblePoints: visibleOrbitPoints,
-      currentPoints: currentOrbitPoints,
-    });
 
     const material = new MeshStandardMaterial({
       map: createPlanetTexture(snapshot.definition),
@@ -284,7 +267,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     const mesh = new Mesh(planetGeometry, material);
     mesh.userData.planetId = snapshot.definition.id;
 
-    const visiblePosition = getDisplayPosition(snapshot.position, "visible");
+    const visiblePosition = getDisplayPosition(snapshot.position);
     const anchor = new Group();
     anchor.position.copy(visiblePosition);
     let ringMesh: Mesh | null = null;
@@ -348,9 +331,8 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const raycaster = new Raycaster();
   const pointer = new Vector2(2, 2);
   const clock = new Clock();
-  const sunRadii = getSunRadii();
-  let sunRadius = sunRadii.visibleRadiusAu;
-  let scaleMode: ScaleMode = "visible";
+  const visibleSunRadiusAu = getVisibleSunRadiusAu();
+  let sunRadius = visibleSunRadiusAu;
   let hoveredPlanetId: string | null = null;
   let selectedPlanetId: string | null = null;
   let cameraAnimation: CameraAnimationState | null = null;
@@ -381,9 +363,9 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     ready: false,
     dateLabel: TARGET_DATE_LABEL,
     julianDate: TARGET_JULIAN_DATE,
-    scaleMode,
+    scaleMode: "visible",
     planetCount: snapshots.length,
-    orbitCount: orbitInstances.length,
+    orbitCount: snapshots.length,
     labels: snapshots.map((snapshot) => snapshot.definition.label),
     selectedPlanetId: null,
     hoveredPlanetId: null,
@@ -443,23 +425,10 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     camera.lookAt(target);
   };
 
-  const getPlanetTargetPosition = (instance: PlanetMeshInstance): Vector3 => {
-    return scaleMode === "true"
-      ? instance.snapshot.position
-      : instance.visiblePosition;
-  };
-
   const getFocusDistance = (instance: PlanetMeshInstance): number => {
     const saturnRingRadius = instance.snapshot.definition.id === "saturn"
       ? SATURN_RING_OUTER_RATIO
       : 1;
-
-    if (scaleMode === "true") {
-      return Math.max(
-        clamp(instance.snapshot.heliocentricDistanceAu * 0.08, 0.45, 1.25),
-        instance.snapshot.trueRadiusAu * saturnRingRadius * 4.2,
-      );
-    }
 
     const visibleRadius = getVisiblePlanetRadius(instance.snapshot.visibleRadiusAu);
     return Math.max(
@@ -490,7 +459,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     selectedPlanetId = planetId;
     updateFocus();
 
-    const target = getPlanetTargetPosition(instance).clone();
+    const target = instance.visiblePosition.clone();
     const preferredDirection = camera.position.clone().sub(orbitControls.target);
 
     if (preferredDirection.lengthSq() < 1e-6) {
@@ -568,20 +537,6 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
     updateFocus();
   };
 
-  const setScaleMode = (mode: ScaleMode) => {
-    stopAutoMotion();
-    scaleMode = mode;
-    options.controls.setScaleMode(mode);
-    testState.scaleMode = mode;
-    document.body.dataset.scaleMode = mode;
-
-    if (selectedPlanetId) {
-      focusPlanet(selectedPlanetId);
-    }
-  };
-
-  options.controls.setScaleMode(scaleMode);
-
   renderer.domElement.addEventListener("pointermove", (event: PointerEvent) => {
     const bounds = renderer.domElement.getBoundingClientRect();
     pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
@@ -628,35 +583,14 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
   const renderFrame = () => {
     const frameDelta = options.testMode ? 0 : Math.min(clock.getDelta(), 0.1);
     const delta = options.testMode ? 1 : Math.min(frameDelta * 5.5, 1);
-    const geometryLerpAmount = options.testMode ? 1 : (delta * 0.18 + 0.08);
     const positionLerpAmount = options.testMode ? 1 : (delta * 0.22 + 0.08);
-
-    for (const orbitInstance of orbitInstances) {
-      const targetPoints = scaleMode === "true"
-        ? orbitInstance.truePoints
-        : orbitInstance.visiblePoints;
-
-      for (let pointIndex = 0; pointIndex < orbitInstance.currentPoints.length; pointIndex += 1) {
-        const currentPoint = orbitInstance.currentPoints[pointIndex];
-        const targetPoint = targetPoints[pointIndex];
-
-        if (currentPoint && targetPoint) {
-          currentPoint.lerp(targetPoint, geometryLerpAmount);
-        }
-      }
-
-      orbitInstance.geometry.setFromPoints(orbitInstance.currentPoints);
-      orbitInstance.geometry.computeBoundingSphere();
-    }
 
     const displayPositions: Record<string, [number, number, number]> = {};
     const displayDistances: Record<string, number> = {};
 
     for (const instance of planetInstances) {
-      const targetRadius = scaleMode === "true"
-        ? instance.snapshot.trueRadiusAu
-        : getVisiblePlanetRadius(instance.snapshot.visibleRadiusAu);
-      const targetPosition = getPlanetTargetPosition(instance);
+      const targetRadius = getVisiblePlanetRadius(instance.snapshot.visibleRadiusAu);
+      const targetPosition = instance.visiblePosition;
 
       instance.currentRadius = options.testMode
         ? targetRadius
@@ -678,8 +612,7 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
       displayDistances[instance.snapshot.definition.id] = instance.currentPosition.length();
     }
 
-    const targetSunRadius = scaleMode === "true" ? sunRadii.trueRadiusAu : sunRadii.visibleRadiusAu;
-    sunRadius = options.testMode ? targetSunRadius : lerp(sunRadius, targetSunRadius, delta * 0.2 + 0.08);
+    sunRadius = options.testMode ? visibleSunRadiusAu : lerp(sunRadius, visibleSunRadiusAu, delta * 0.2 + 0.08);
     sunMesh.scale.setScalar(sunRadius);
     const sunGlowRadius = sunRadius * SUN_GLOW_RADIUS_RATIO;
     sunGlow.scale.set(sunGlowRadius * 2, sunGlowRadius * 2, 1);
@@ -784,7 +717,6 @@ export function createPlanetariumScene(options: PlanetariumSceneOptions): {
 
   return {
     focusPlanet,
-    setScaleMode,
   };
 }
 
