@@ -1,0 +1,26 @@
+{
+  "name": "planetarium",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "check": "bun run typecheck && bun run test",
+    "dev": "vite",
+    "build": "bun run typecheck && vite build",
+    "postinstall": "playwright install chromium",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:update": "playwright test --update-snapshots"
+  },
+  "dependencies": {
+    "three": "0.162.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^25.5.0",
+    "@types/three": "0.162.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.0"
+  }
+}
