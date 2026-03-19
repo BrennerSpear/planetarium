@@ -10,6 +10,8 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   const alignmentGuideLayer = page.locator("[data-alignment-guide-layer]");
   const distanceLabelLayer = page.locator("[data-distance-label-layer]");
   const focusAccent = page.locator("[data-focus-accent]");
+  const rankingsDisclosure = page.locator("[data-rankings-disclosure]");
+  const rankingsTable = page.locator("[data-rankings-table]");
 
   await expect(labels).toHaveCount(8);
   await expect(distanceLabels).toHaveCount(0);
@@ -37,7 +39,91 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await expect(page.locator(".footer-panel .lede")).toHaveText(
     "Floating planet names and faint orbital rings keep the alignment legible while you pan, orbit, and zoom.",
   );
+  await expect(rankingsDisclosure).toHaveJSProperty("open", false);
+  await expect(rankingsTable).toBeHidden();
+  await page.locator("[data-rankings-toggle]").click();
+  await expect(rankingsDisclosure).toHaveJSProperty("open", true);
+  await expect(rankingsTable).toBeVisible();
+  await expect(page.locator("[data-rankings-row]")).toHaveCount(15);
+  await expect(page.locator("[data-rankings-row][data-current='true']")).toHaveCount(1);
+  await expect(page.locator("[data-rankings-row][data-tightest='true']")).toHaveCount(1);
+  await expect(page.locator("[data-rankings-row][data-current='true']")).toContainText("★ You are here");
+  await expect(page.locator("[data-rankings-footnote]")).toContainText(
+    "Computed from JPL Keplerian elements (J2000 epoch). Spread = minimum arc containing all 8 planets.",
+  );
+  await expect(page.locator("[data-rankings-footnote]")).toContainText(
+    'The often-cited 1665 "within 30°" claim is wrong; the actual all-8-planet spread was 146.8°.',
+  );
   await expect(focusAccent).toBeHidden();
+
+  const historicalRows = await page.locator("[data-rankings-row]").evaluateAll((rows) => rows.map((row) => {
+    const cells = Array.from(row.querySelectorAll("td"), (cell) => cell.textContent?.replace(/\s+/g, " ").trim() ?? "");
+
+    return {
+      rank: cells[0] ?? "",
+      date: cells[1] ?? "",
+      spread: cells[2] ?? "",
+      current: row.getAttribute("data-current") ?? "false",
+      tightest: row.getAttribute("data-tightest") ?? "false",
+    };
+  }));
+
+  expect(historicalRows.map((row) => row.date)).toEqual([
+    "Dec 1, 117",
+    "Jan 24, 449",
+    "Jan 26, 628",
+    "Feb 6, 949",
+    "Jul 4, 987",
+    "Jun 13, 989",
+    "Apr 18, 1128",
+    "Sep 8, 1166",
+    "Apr 23, 1307",
+    "Jun 9, 1817",
+    "May 19, 2161 ★ You are here",
+    "Nov 8, 2176",
+    "Sep 30, 2851",
+    "Jan 7, 2892",
+    "Jul 22, 2992",
+  ]);
+  expect(historicalRows.map((row) => row.rank)).toEqual([
+    "#13",
+    "#3",
+    "#4",
+    "#11",
+    "#5",
+    "#9",
+    "#1",
+    "#7",
+    "#2",
+    "#15",
+    "#6",
+    "#10",
+    "#12",
+    "#14",
+    "#8",
+  ]);
+
+  const tightestRow = historicalRows.find((row) => row.tightest === "true");
+  expect(tightestRow).toEqual({
+    rank: "#1",
+    date: "Apr 18, 1128",
+    spread: "40.7°",
+    current: "false",
+    tightest: "true",
+  });
+
+  const currentRow = historicalRows.find((row) => row.current === "true");
+  expect(currentRow).toEqual({
+    rank: "#6",
+    date: "May 19, 2161 ★ You are here",
+    spread: "68.8°",
+    current: "true",
+    tightest: "false",
+  });
+
+  await page.locator("[data-rankings-toggle]").click();
+  await expect(rankingsDisclosure).toHaveJSProperty("open", false);
+  await expect(rankingsTable).toBeHidden();
 
   const initialState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(initialState).toBeTruthy();

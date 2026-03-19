@@ -73,6 +73,10 @@ textarea {
   align-content: start;
   gap: 1rem;
   padding: 1.2rem;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
 }
 
@@ -180,6 +184,146 @@ h2 {
   transition: border-color 180ms ease;
 }
 
+.rankings-panel {
+  padding: 0.9rem 1.05rem 1rem;
+}
+
+.rankings-disclosure {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.rankings-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rankings-summary:focus-visible {
+  outline: 2px solid rgba(140, 184, 255, 0.55);
+  outline-offset: 0.24rem;
+  border-radius: 0.5rem;
+}
+
+.rankings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.rankings-summary::marker {
+  content: "";
+}
+
+.rankings-summary-label {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rankings-chevron {
+  flex: 0 0 auto;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-right: 1.5px solid var(--text-soft);
+  border-bottom: 1.5px solid var(--text-soft);
+  transform: rotate(45deg);
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.rankings-disclosure[open] .rankings-chevron {
+  transform: rotate(225deg) translate(-0.08rem, -0.08rem);
+  border-color: var(--accent-strong);
+}
+
+.rankings-content {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.rankings-table-wrap {
+  overflow-x: auto;
+}
+
+.rankings-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 268px;
+}
+
+.rankings-table th,
+.rankings-table td {
+  padding: 0.58rem 0.2rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(149, 186, 255, 0.14);
+}
+
+.rankings-table th {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rankings-table td {
+  font-size: 0.84rem;
+  color: var(--text-muted);
+}
+
+.rankings-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.rankings-row td:first-child,
+.rankings-row td:last-child {
+  white-space: nowrap;
+}
+
+.rankings-row[data-tightest="true"] {
+  background: rgba(210, 224, 255, 0.06);
+}
+
+.rankings-row[data-tightest="true"] td {
+  color: var(--accent-strong);
+}
+
+.rankings-row[data-current="true"] {
+  background: linear-gradient(90deg, rgba(140, 184, 255, 0.18), rgba(140, 184, 255, 0.06));
+}
+
+.rankings-row[data-current="true"] td {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.rankings-date-cell {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.rankings-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.18rem 0.42rem;
+  border: 1px solid rgba(140, 184, 255, 0.34);
+  border-radius: 999px;
+  background: rgba(12, 28, 52, 0.72);
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.rankings-footnote {
+  color: var(--text-soft);
+  font-size: 0.77rem;
+  line-height: 1.55;
+}
+
 .info-grid {
   display: grid;
   gap: 0.8rem;
@@ -261,6 +405,10 @@ h2 {
   }
 
   .info-panel {
+    transition: none;
+  }
+
+  .rankings-chevron {
     transition: none;
   }
 }
