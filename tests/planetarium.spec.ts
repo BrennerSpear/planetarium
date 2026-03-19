@@ -5,6 +5,9 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await page.waitForSelector("body[data-scene-ready='true']");
   await waitForStableFrame(page);
 
+  const hud = page.locator("[data-hud-root]");
+  const sidebar = page.locator("[data-sidebar]");
+  const sidebarDatePill = page.locator("[data-sidebar-date-pill]");
   const labels = page.locator("[data-planet-label]");
   const distanceLabels = page.locator("[data-distance-label]");
   const alignmentGuideLayer = page.locator("[data-alignment-guide-layer]");
@@ -12,6 +15,21 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   const focusAccent = page.locator("[data-focus-accent]");
   const rankingsDisclosure = page.locator("[data-rankings-disclosure]");
   const rankingsTable = page.locator("[data-rankings-table]");
+
+  await expect(hud).toHaveAttribute("data-sidebar-mode", "desktop");
+  await expect(hud).toHaveAttribute("data-sidebar-open", "true");
+  await expect(sidebar).toHaveAttribute("aria-hidden", "false");
+  await expect(page.getByRole("button", { name: "Hide sidebar" })).toBeVisible();
+  await expect(sidebarDatePill).toHaveAttribute("aria-hidden", "true");
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
+  await expect(hud).toHaveAttribute("data-sidebar-open", "false");
+  await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
+  await expect(sidebarDatePill).toHaveAttribute("aria-hidden", "false");
+  await expect(sidebarDatePill).toContainText("MAY 19, 2161");
+  await page.getByRole("button", { name: "Show sidebar" }).click();
+  await expect(hud).toHaveAttribute("data-sidebar-open", "true");
+  await expect(sidebar).toHaveAttribute("aria-hidden", "false");
 
   await expect(labels).toHaveCount(8);
   await expect(distanceLabels).toHaveCount(0);
@@ -246,6 +264,49 @@ test("renders Saturn rings and Sun glow closeups deterministically", async ({ pa
   const sunState = await page.evaluate(() => window.__planetariumTestApi?.getState());
   expect(sunState?.visuals.sun.glowOpacity).toBeGreaterThan(0.5);
   await expect(page.locator("[data-scene-root]")).toHaveScreenshot("planetarium-sun-glow.png");
+});
+
+test.describe("mobile sidebar toggle", () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 1,
+    hasTouch: false,
+  });
+
+  test("starts collapsed on mobile and expands on demand", async ({ page }) => {
+    await page.goto("/?test=1");
+    await page.waitForSelector("body[data-scene-ready='true']");
+    await waitForStableFrame(page);
+
+    const hud = page.locator("[data-hud-root]");
+    const sidebar = page.locator("[data-sidebar]");
+    const datePill = page.locator("[data-sidebar-date-pill]");
+
+    await expect(hud).toHaveAttribute("data-sidebar-mode", "mobile");
+    await expect(hud).toHaveAttribute("data-sidebar-open", "false");
+    await expect(sidebar).toHaveAttribute("aria-hidden", "true");
+    await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
+    await expect(datePill).toHaveAttribute("aria-hidden", "false");
+    await expect(datePill).toContainText("MAY 19, 2161");
+    await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-mobile-sidebar-hidden.png");
+
+    await page.getByRole("button", { name: "Show sidebar" }).click();
+    await expect(hud).toHaveAttribute("data-sidebar-open", "true");
+    await expect(sidebar).toHaveAttribute("aria-hidden", "false");
+    await expect(page.getByRole("button", { name: "Hide sidebar" })).toBeVisible();
+    await expect(datePill).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-mobile-sidebar-open.png");
+
+    await page.getByRole("button", { name: "Hide sidebar" }).click();
+    await expect(hud).toHaveAttribute("data-sidebar-open", "false");
+    const cameraBeforeOrbit = await page.evaluate(() => window.__planetariumTestApi?.getState().camera);
+    await page.mouse.move(320, 560);
+    await page.mouse.down();
+    await page.mouse.move(272, 498, { steps: 12 });
+    await page.mouse.up();
+    const cameraAfterOrbit = await page.evaluate(() => window.__planetariumTestApi?.getState().camera);
+    expect(cameraAfterOrbit).not.toEqual(cameraBeforeOrbit);
+  });
 });
 
 async function framePlanet(page: Page, planetId: string): Promise<void> {
