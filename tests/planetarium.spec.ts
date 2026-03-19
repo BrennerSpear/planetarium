@@ -187,12 +187,24 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
     };
   }));
 
+  const labelStyles = await readPlanetLabels(page);
+
   for (const label of labelRects) {
     expect(label.hidden, `${label.id} should render on first load`).toBe(false);
     expect(label.left, `${label.id} should stay inside the left edge`).toBeGreaterThanOrEqual(0);
     expect(label.top, `${label.id} should stay inside the top edge`).toBeGreaterThanOrEqual(0);
     expect(label.right, `${label.id} should stay inside the right edge`).toBeLessThanOrEqual(1440);
     expect(label.bottom, `${label.id} should stay inside the bottom edge`).toBeLessThanOrEqual(900);
+  }
+
+  expect(findOverlappingLabels(labelRects)).toEqual([]);
+
+  for (const label of labelStyles) {
+    expect(label.display, `${label.id} should stay visible on desktop`).not.toBe("none");
+    expect(label.fontSize, `${label.id} should be materially smaller on desktop`).toBeLessThanOrEqual(8);
+    expect(label.backgroundImage, `${label.id} should not render a background box`).toBe("none");
+    expect(label.boxShadow, `${label.id} should not render a box shadow`).toBe("none");
+    expect(label.textShadow, `${label.id} should keep a readability shadow`).not.toBe("none");
   }
 
   const cameraDistance = distanceBetween(initialState?.camera.position, initialState?.camera.target);
@@ -288,6 +300,9 @@ test.describe("mobile sidebar toggle", () => {
     await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
     await expect(datePill).toHaveAttribute("aria-hidden", "false");
     await expect(datePill).toContainText("MAY 19, 2161");
+    const hiddenLabels = await readPlanetLabels(page);
+    expect(hiddenLabels).toHaveLength(8);
+    expect(hiddenLabels.filter((label) => label.display !== "none" && !label.hidden)).toEqual([]);
     await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-mobile-sidebar-hidden.png");
 
     await page.getByRole("button", { name: "Show sidebar" }).click();
@@ -295,6 +310,8 @@ test.describe("mobile sidebar toggle", () => {
     await expect(sidebar).toHaveAttribute("aria-hidden", "false");
     await expect(page.getByRole("button", { name: "Hide sidebar" })).toBeVisible();
     await expect(datePill).toHaveAttribute("aria-hidden", "true");
+    const openLabels = await readPlanetLabels(page);
+    expect(openLabels.filter((label) => label.display !== "none" && !label.hidden)).toEqual([]);
     await expect(page.locator(".app-shell")).toHaveScreenshot("planetarium-mobile-sidebar-open.png");
 
     await page.getByRole("button", { name: "Hide sidebar" }).click();
@@ -332,6 +349,66 @@ async function hideUiChromeForCapture(page: Page): Promise<void> {
     document.querySelector<HTMLElement>("[data-hud-root]")?.style.setProperty("display", "none");
     document.querySelector<HTMLElement>("[data-overlay-root]")?.style.setProperty("display", "none");
   });
+}
+
+async function readPlanetLabels(page: Page): Promise<Array<{
+  id: string;
+  hidden: boolean;
+  display: string;
+  fontSize: number;
+  backgroundImage: string;
+  boxShadow: string;
+  textShadow: string;
+}>> {
+  return page.locator("[data-planet-label]").evaluateAll((nodes) => nodes.map((node) => {
+    const element = node as HTMLElement;
+    const style = getComputedStyle(element);
+
+    return {
+      id: element.dataset.planetLabel ?? "",
+      hidden: element.hidden,
+      display: style.display,
+      fontSize: Number.parseFloat(style.fontSize),
+      backgroundImage: style.backgroundImage,
+      boxShadow: style.boxShadow,
+      textShadow: style.textShadow,
+    };
+  }));
+}
+
+function findOverlappingLabels(labels: Array<{
+  id: string;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}>): string[] {
+  const overlaps: string[] = [];
+
+  for (let index = 0; index < labels.length; index += 1) {
+    const current = labels[index];
+
+    if (!current) {
+      continue;
+    }
+
+    for (let nextIndex = index + 1; nextIndex < labels.length; nextIndex += 1) {
+      const next = labels[nextIndex];
+
+      if (!next) {
+        continue;
+      }
+
+      const overlapsHorizontally = current.left < next.right && current.right > next.left;
+      const overlapsVertically = current.top < next.bottom && current.bottom > next.top;
+
+      if (overlapsHorizontally && overlapsVertically) {
+        overlaps.push(`${current.id}/${next.id}`);
+      }
+    }
+  }
+
+  return overlaps;
 }
 
 function distanceBetween(
