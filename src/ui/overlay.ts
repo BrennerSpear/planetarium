@@ -74,11 +74,12 @@ export function createOverlayLayer(options: OverlayLayerOptions): OverlayLayer {
         const isSelected = state.selectedId === label.id;
         const isHovered = state.hoveredId === label.id;
         const rank = rankById.get(label.id) ?? 0;
+        const yOffset = -10 - Math.min(rank, 4) * 24;
 
         button.dataset.selected = String(isSelected);
         button.dataset.hovered = String(isHovered);
         button.style.zIndex = String(isSelected || isHovered ? 2_000 : Math.max(1, 1_000 - rank));
-        projectNode(button, label.position, camera, viewport, { yOffset: -12 - rank * 18 });
+        projectNode(button, label.position, camera, viewport, { yOffset });
       }
 
       for (const [id, button] of planetButtons) {
