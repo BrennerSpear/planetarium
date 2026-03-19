@@ -149,7 +149,6 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
           </div>
           <p class="rankings-footnote" data-rankings-footnote>
             Computed from JPL Keplerian elements (J2000 epoch). Spread = minimum arc containing all 8 planets.
-            The often-cited 1665 "within 30°" claim is wrong; the actual all-8-planet spread was 146.8°.
           </p>
         </div>
       </details>

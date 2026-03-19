@@ -51,9 +51,7 @@ test("renders the 2161 alignment scene with deterministic controls", async ({ pa
   await expect(page.locator("[data-rankings-footnote]")).toContainText(
     "Computed from JPL Keplerian elements (J2000 epoch). Spread = minimum arc containing all 8 planets.",
   );
-  await expect(page.locator("[data-rankings-footnote]")).toContainText(
-    'The often-cited 1665 "within 30°" claim is wrong; the actual all-8-planet spread was 146.8°.',
-  );
+
   await expect(focusAccent).toBeHidden();
 
   const historicalRows = await page.locator("[data-rankings-row]").evaluateAll((rows) => rows.map((row) => {
