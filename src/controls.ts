@@ -1,5 +1,6 @@
 import type { PlanetSnapshot } from "./planets";
 import { formatDistanceAu, formatDistanceMillionKm } from "./planets";
+import { HISTORICAL_RANKINGS } from "./rankings";
 
 export interface ControlPanel {
   updateFocus(snapshot: PlanetSnapshot | null, source: "hover" | "selected" | "none"): void;
@@ -57,6 +58,23 @@ function getDefaultInfoCopy(dateLabel: string): Record<keyof typeof PLANET_INFO_
 export function createControlPanel(options: ControlPanelOptions): ControlPanel {
   const root = options.root;
   const defaultInfoCopy = getDefaultInfoCopy(options.dateLabel);
+  const rankingsRows = HISTORICAL_RANKINGS.map((ranking) => `
+    <tr
+      class="rankings-row"
+      data-rankings-row
+      data-current="${String(Boolean(ranking.isCurrent))}"
+      data-tightest="${String(Boolean(ranking.isTightest))}"
+    >
+      <td>${ranking.rankLabel}</td>
+      <td>
+        <div class="rankings-date-cell">
+          <span>${ranking.dateLabel}</span>
+          ${ranking.isCurrent ? '<span class="rankings-badge">★ You are here</span>' : ""}
+        </div>
+      </td>
+      <td>${ranking.spreadLabel}</td>
+    </tr>
+  `).join("");
 
   root.innerHTML = `
     <section class="panel brand-panel">
@@ -106,6 +124,35 @@ export function createControlPanel(options: ControlPanelOptions): ControlPanel {
           <span class="info-value" data-info-note>${defaultInfoCopy.note.value}</span>
         </div>
       </div>
+    </section>
+
+    <section class="panel rankings-panel">
+      <details class="rankings-disclosure" data-rankings-disclosure>
+        <summary class="rankings-summary" data-rankings-toggle>
+          <span class="rankings-summary-label">📊 Historical Rankings (Top 15)</span>
+          <span class="rankings-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="rankings-content">
+          <div class="rankings-table-wrap">
+            <table class="rankings-table" data-rankings-table>
+              <thead>
+                <tr>
+                  <th scope="col">Rank</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Spread</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rankingsRows}
+              </tbody>
+            </table>
+          </div>
+          <p class="rankings-footnote" data-rankings-footnote>
+            Computed from JPL Keplerian elements (J2000 epoch). Spread = minimum arc containing all 8 planets.
+            The often-cited 1665 "within 30°" claim is wrong; the actual all-8-planet spread was 146.8°.
+          </p>
+        </div>
+      </details>
     </section>
 
     <section class="panel footer-panel">
